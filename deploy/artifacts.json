@@ -1,0 +1,5 @@
+[
+  {"file":"rama-1.9.0.zip", "url":"https://redplanetlabs.s3.us-west-2.amazonaws.com/rama/rama-1.9.0.zip", "algorithm":"sha256", "digest":"62d0cc1ec1d68d339bcd1a88b4420a8549e7dc275646e808263f40d4dccbc423"},
+  {"file":"CLIProxyAPI_7.3.15_linux_amd64.tar.gz", "url":"https://github.com/router-for-me/CLIProxyAPI/releases/download/v7.3.15/CLIProxyAPI_7.3.15_linux_amd64.tar.gz", "algorithm":"sha256", "digest":"801c3a23061d57a830e67fcd033fda26e96c2bfe93e1b2e34e4428ed7defc7e5"},
+  {"file":"apache-zookeeper-3.9.6-bin.tar.gz", "url":"https://downloads.apache.org/zookeeper/zookeeper-3.9.6/apache-zookeeper-3.9.6-bin.tar.gz", "algorithm":"sha512", "digest":"e999626df06de30dc8bb53bb51da9bb786b1658406adafc6b92f104d72ca25e869f70a57c83a726f8b9558cc0fb519fc20f201aa5d6da09884bc4be5fe6dd3b0"}
+]

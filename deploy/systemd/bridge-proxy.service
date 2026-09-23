@@ -1,0 +1,32 @@
+[Unit]
+Description=Private bridge proxy
+Requires=bridge-firewall.service
+After=network-online.target bridge-firewall.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+[Service]
+Type=simple
+User=bridge-proxy
+Group=bridge-proxy
+WorkingDirectory=/var/lib/bridge-proxy
+ExecStart=/opt/bridge/current/cli-proxy-api -config /var/lib/bridge-proxy/config.yaml
+ReadWritePaths=/var/lib/bridge-proxy
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=120s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LimitNOFILE=65536
+StandardOutput=null
+StandardError=null
+[Install]
+WantedBy=multi-user.target

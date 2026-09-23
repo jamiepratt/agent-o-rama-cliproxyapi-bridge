@@ -1,0 +1,17 @@
+conductor.host: "127.0.0.1"
+supervisor.host: "127.0.0.1"
+zookeeper.servers: ["127.0.0.1"]
+zookeeper.port: 2181
+zookeeper.root: "bridge"
+local.dir: "/var/lib/bridge-rama/data"
+license.dir: "/var/lib/bridge-rama/licenses"
+conductor.port: 1973
+cluster.ui.port: 8888
+supervisor.port.range: [20000, 21000]
+conductor.child.opts: "-Xms128m -Xmx512m -Xss6m"
+supervisor.child.opts: "-Xms64m -Xmx256m -Xss6m"
+worker.child.opts: "-Xms256m -Xmx2048m -Xss6m -Djdk.attach.allowAttachSelf"
+conductor.assignment.mode:
+  type: isolation
+  modules:
+    bridge.module/ProxyModule: 1

@@ -1,0 +1,18 @@
+# Dedicated host only. Never flush the operator's existing ruleset.
+# inet protects both IPv4 and IPv6. Rama host settings are not bind restrictions.
+table inet bridge {
+  chain input {
+    type filter hook input priority 10; policy drop;
+    iifname "lo" accept
+    ct state invalid drop
+    ct state established,related accept
+    # Path MTU, IPv6 neighbor/router discovery and diagnostic ICMP.
+    ip protocol icmp accept
+    meta l4proto ipv6-icmp accept
+    udp sport 67 udp dport 68 accept
+    udp sport 547 udp dport 546 accept
+    # Optional direct Tailscale connectivity; DERP also works over outbound HTTPS.
+    udp dport 41641 accept
+    iifname "tailscale0" tcp dport { 22, 1974, 8888 } accept
+  }
+}

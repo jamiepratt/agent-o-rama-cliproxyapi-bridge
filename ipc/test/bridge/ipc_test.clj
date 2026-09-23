@@ -505,7 +505,7 @@
       (is (= (inc before) (count @calls)))
       (let [second-call (aor/agent-initiate client {:prompt "different" :call-id "in-flight"})
             result (try (.get (aor/agent-result-async client second-call) 1 TimeUnit/SECONDS)
-                        (catch Exception _ :no-typed-conflict))]
+                        (catch Exception error {:unexpected-exception (.getName (class error))}))]
         (is (= {:error {:type :bridge.replay/identity-conflict}} result)))
       (finally (deliver race-release true)))
     (aor/agent-result client first-call)
@@ -610,7 +610,7 @@
       (finally (obs/stop! observer)))))
 
 (defn -main [& _]
-  (require 'bridge.admission-config-test)
-  (let [{:keys [fail error]} (run-tests 'bridge.ipc-test 'bridge.admission-config-test 'bridge.locks-test 'bridge.observability-test)]
+  (require 'bridge.admission-config-test 'bridge.runtime-test)
+  (let [{:keys [fail error]} (run-tests 'bridge.ipc-test 'bridge.admission-config-test 'bridge.locks-test 'bridge.observability-test 'bridge.runtime-test)]
     (shutdown-agents)
     (System/exit (if (zero? (+ fail error)) 0 1))))

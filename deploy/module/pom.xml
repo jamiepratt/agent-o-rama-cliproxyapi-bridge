@@ -1,0 +1,30 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>bridge</groupId><artifactId>bridge-module</artifactId><version>1.0.0</version>
+  <repositories>
+    <repository><id>rpl</id><url>https://nexus.redplanetlabs.com/repository/maven-public-releases</url></repository>
+    <repository><id>clojars</id><url>https://repo.clojars.org</url></repository>
+  </repositories>
+  <dependencies>
+    <dependency><groupId>bridge</groupId><artifactId>openai-isolated</artifactId><version>1.0.0</version><exclusions><exclusion><groupId>*</groupId><artifactId>*</artifactId></exclusion></exclusions></dependency>
+    <dependency><groupId>com.rpl</groupId><artifactId>rama</artifactId><version>1.9.0</version><scope>provided</scope></dependency>
+    <dependency><groupId>com.rpl</groupId><artifactId>agent-o-rama</artifactId><version>0.10.0</version></dependency>
+    <dependency><groupId>org.clojure</groupId><artifactId>clojure</artifactId><version>1.12.4</version></dependency>
+    <dependency><groupId>org.clojure</groupId><artifactId>data.json</artifactId><version>2.5.1</version></dependency>
+    <dependency><groupId>com.google.code.gson</groupId><artifactId>gson</artifactId><version>2.12.1</version></dependency>
+    <dependency><groupId>dev.langchain4j</groupId><artifactId>langchain4j-open-ai-official</artifactId><version>1.18.1-beta28</version><exclusions><exclusion><groupId>com.openai</groupId><artifactId>openai-java</artifactId></exclusion></exclusions></dependency>
+  </dependencies>
+  <build>
+    <directory>../target</directory>
+    <finalName>bridge</finalName>
+    <resources><resource><directory>../../ipc/src</directory></resource><resource><directory>../../ipc/resources</directory></resource></resources>
+    <plugins>
+      <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-resources-plugin</artifactId><version>3.3.1</version></plugin>
+      <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-jar-plugin</artifactId><version>3.4.2</version></plugin>
+      <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-assembly-plugin</artifactId><version>3.7.1</version>
+        <configuration><descriptorRefs><descriptorRef>jar-with-dependencies</descriptorRef></descriptorRefs></configuration>
+        <executions><execution><id>bundle</id><phase>package</phase><goals><goal>single</goal></goals></execution></executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

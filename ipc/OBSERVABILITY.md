@@ -9,7 +9,7 @@ export the same counters and must not be summed.
 ```clojure
 (require '[bridge.observability :as obs]
          '[com.rpl.rama :as rama])
-(def state (rama/foreign-pstate cluster "ProxyModule" "$$admission"))
+(def state (rama/foreign-pstate cluster "bridge.module/ProxyModule" "$$admission"))
 (def observer
   (obs/start! {:port 0 ; ephemeral port, returned as :port
                :snapshot #(rama/foreign-select-one ["admission"] state)
