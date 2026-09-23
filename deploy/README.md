@@ -2,10 +2,10 @@
 
 [Issue #5 remains open](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/5).
 These are reviewable installation artifacts, not an accepted production deployment.
-Initial preparation and validation ran on macOS. Subsequent Ubuntu 24.04
-check-only validation covered firewall syntax and systemd unit parsing; services
-were not yet installed or started. Production approval, device login,
-network isolation, memory/update, reboot and recovery acceptance remain in #5;
+Initial preparation and validation ran on macOS. The Ubuntu 24.04 VPS has since
+passed firewall syntax, installed systemd unit validation, and the no-provider
+deployed-module readiness check described below. The full deployment acceptance,
+including memory/update, reboot and recovery evidence, remains tracked in #5;
 [the complete acceptance story is #8](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/8).
 
 ## Payload and trust
@@ -36,6 +36,19 @@ main module excludes the original SDK dependency. AOR/Clojure sources remain
 unrelocated, and Rama's shipped libraries are untouched. The isolated SDK merges
 service-provider descriptors. This additional packaging is checked using the
 actual Rama distribution classpath, not just the Clojure dependency classpath.
+
+Distributed workers also load generated topology bytecode in separate
+classloaders. Replay/admission paths construct their partial functions in ordinary
+Clojure helpers called as explicit dataflow operation segments; embedding function values in
+the topology caused a worker `ClassCastException` during task initialization.
+IPC tests alone did not expose this. After deployment, run
+`BRIDGE_CHECK_RUNNING=1 python3 -B -m unittest discover -s deploy/tests -p test_running_stack.py`
+on the VPS. This opt-in check reads both UIs and the observer's real admission
+PState metrics without generating provider traffic. It complements streaming
+acceptance; a running service process alone does not prove the module is alive.
+On the VPS this check failed while the worker exited during initialization,
+then passed after the explicit-operation fix with both UIs responding and the
+module's admission PState readable. No provider request was needed for this check.
 
 The root-owned runtime payload is in `/opt/bridge/releases/`, with `current`
 pointing at the pinned three-runtime release. Content-addressed submitted jars
