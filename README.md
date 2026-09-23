@@ -4,3 +4,5 @@ Compatibility spike for a Clojure Agent-o-rama reliability adapter around CLIPro
 The adapter is gated on [issue #7](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/7).
 
 See [the direct API spike](spike/README.md) for setup, validation and observed results.
+
+See [the Agent-o-rama IPC spike](ipc/README.md) for Clojure integration checks.

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="OFF">
+  <!-- Model failures may contain response bodies. Persist only allowlisted evidence. -->
+  <Loggers><Root level="OFF"/></Loggers>
+</Configuration>
