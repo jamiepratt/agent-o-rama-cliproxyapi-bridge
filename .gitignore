@@ -6,3 +6,6 @@ auth/
 logs/
 .cpcache/
 .clj-kondo/.cache/
+
+deploy/**/target/
+deploy/target/

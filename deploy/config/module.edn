@@ -1,0 +1,6 @@
+{:base-url "http://127.0.0.1:18317/v1"
+ :model "gpt-6-luna"
+ :bearer-file "/var/lib/bridge-rama/bearer"
+ :lock-dir "/var/lib/bridge-rama/locks"
+ :timeout-ms 30000 :deadline-ms 1 :sweep-ms 60000
+ :active-limit 10 :queue-limit 50}

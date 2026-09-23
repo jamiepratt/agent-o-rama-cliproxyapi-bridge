@@ -1,0 +1,1 @@
+worker.child.opts: "-Xms256m -Xmx2048m -Xss6m -Djdk.attach.allowAttachSelf"

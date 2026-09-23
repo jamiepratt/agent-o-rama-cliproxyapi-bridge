@@ -8,3 +8,5 @@ See [the direct API spike](spike/README.md) for setup, validation and observed r
 See [the Agent-o-rama IPC spike](ipc/README.md) for Clojure integration checks.
 
 See [private provider readiness and Prometheus metrics](ipc/OBSERVABILITY.md).
+
+See [private deployment preparation and operator gates](deploy/README.md).

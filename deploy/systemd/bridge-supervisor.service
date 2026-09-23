@@ -1,0 +1,33 @@
+[Unit]
+Description=Private bridge supervisor
+Requires=bridge-firewall.service
+After=network-online.target bridge-firewall.service bridge-conductor.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+[Service]
+Type=simple
+User=bridge-rama
+Group=bridge-rama
+WorkingDirectory=/opt/bridge/current/rama
+ExecStart=/opt/bridge/current/rama/rama supervisor
+ReadWritePaths=/var/lib/bridge-rama /var/log/bridge-rama
+KillMode=process
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=120s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LimitNOFILE=65536
+StandardOutput=null
+StandardError=null
+[Install]
+WantedBy=multi-user.target

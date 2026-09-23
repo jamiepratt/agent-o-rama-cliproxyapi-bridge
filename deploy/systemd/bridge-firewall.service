@@ -1,0 +1,9 @@
+[Unit]
+Description=Private bridge ingress boundary
+Before=bridge-zk.service bridge-conductor.service bridge-supervisor.service bridge-proxy.service bridge-ui.service
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/nft -f /etc/bridge/firewall.nft
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target
