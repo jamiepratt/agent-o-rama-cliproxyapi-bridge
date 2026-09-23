@@ -79,6 +79,7 @@
    (let [topology (aor/agent-topology setup topologies)]
      (declare-tick-depot setup *replay-tick sweep-ms)
      (declare-depot setup *admission-changes (hash-by :key))
+     (declare-depot setup *completed-changes (hash-by :identity))
      (aor/declare-pstate-store topology "$$completed-calls" {String Object})
      (aor/declare-pstate-store topology "$$admission" {String Object})
      (aor/declare-pstate-store topology "$$admission-receipts" {String Long})
@@ -141,6 +142,10 @@
                         (local-transform> [*command-id (termval *expires)] $$admission-receipts))
                   (admission/command-status *command-now *expires :> *status)
                   (ack-return> *status)
+                  (source> *completed-changes :> *completion)
+                  (get *completion :identity :> *identity)
+                  (<<if (replay/completion-current? *completion)
+                        (local-transform> [*identity (term (partial replay/complete-command *completion))] $$completed-calls))
                   (source> *replay-tick)
                   (|all)
                   (System/currentTimeMillis :> *now)

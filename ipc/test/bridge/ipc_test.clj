@@ -6,6 +6,7 @@
             [com.rpl.agent-o-rama.langchain4j :as lc4j]
             [com.rpl.agent-o-rama.langchain4j.json :as schema]
             [com.rpl.rama :as rama]
+            [com.rpl.rama.path :as path]
             [bridge.replay :as replay]
             [bridge.admission :as admission]
             [bridge.locks-test]
@@ -77,7 +78,7 @@
    (let [calls (atom [])
          release (promise) race-release (promise) generation-release (promise) coalesce-release (promise)
          activity (atom {:active 0 :maximum 0})
-         bounded-release (into {"failure-shared" (promise) "deadline-shared" (promise) "expiry-coalesce" (promise) "expiry-cancel" (promise)}
+         bounded-release (into {"failure-shared" (promise) "deadline-shared" (promise) "expiry-coalesce" (promise) "expiry-cancel" (promise) "completion-expiry" (promise)}
                                (for [prefix ["bounded-" "cancel-" "restart-" "small-"] n (range 61)]
                                  [(str prefix n) (promise)]))
          gates (merge bounded-release {"pause" release "identity-race" race-release
@@ -249,6 +250,18 @@
         (is (= :updated (deref updated 90000 :update-timeout)))
         (is (= 10 (- (count @calls) before)))
         (is (= 10 (:maximum @activity))))
+      ;; Free one slot at a time: simultaneous promotions may reach HTTP in
+      ;; either order even though the durable queue admits them FIFO.
+      (doseq [n (range 2)]
+        (deliver (get bounded-release (str "restart-" n)) true)
+        (is (or (eventually #(= (+ 11 n) (- (count @calls) before)))
+                (do (println :restart-reservations
+                             (mapv #(select-keys % [:call-id :phase :dispatched? :terminal? :error])
+                                   (vals (:entries (rama/foreign-select-one ["admission"] state)))))
+                    false)))
+        (is (= (+ 11 n) (- (count @calls) before)))
+        (is (= (str "restart-" (+ 10 n))
+               (get-in (nth @calls (+ before 10 n)) [:messages 0 :content]))))
       (finally (doseq [[key gate] bounded-release :when (str/starts-with? key "restart-")] (deliver gate true))))
     (doseq [invoke @invocations]
       (is (= "one two" (:text (result-within client invoke)))))
@@ -316,6 +329,42 @@
           (is (= "one two" (:text (aor/agent-invoke client request))))
           (is (= 1 (- (count @calls) before)))))
       (finally (deliver (get bounded-release "expiry-coalesce") true)))))
+
+(deftest completion-depot-redelivery-keeps-first-result-and-cannot-revive-expired-success
+  (let [{:keys [ipc module-name client]} *context*
+        depot (rama/foreign-depot ipc module-name "*completed-changes")
+        state (rama/foreign-pstate ipc module-name "$$completed-calls")
+        identity "completion-command-fixture"
+        command {:identity identity :fingerprint "fixture-digest" :generation (str (java.util.UUID/randomUUID))
+                 :result {:fixture "first"} :chunks ["one"] :expires-at (+ (System/currentTimeMillis) 2000)}]
+    (with-redefs [replay/retention-ms 2000]
+      (rama/foreign-append! depot command)
+      (let [saved (rama/foreign-select-one [identity] state)]
+        (is (= {:fixture "first"} (:result saved)))
+        (rama/foreign-append! depot (assoc command :result {:fixture "second"} :expires-at (inc (:expires-at command))))
+        (is (= saved (rama/foreign-select-one [identity] state))))
+      (is (eventually #(nil? (rama/foreign-select-one [identity] state))))
+      (rama/foreign-append! depot command)
+      (is (empty? (rama/foreign-select [(path/must identity)] state {:pkey identity})))
+      (is (= "one two" (:text (result-within client (aor/agent-initiate client {:prompt "fixture"}))))))))
+
+(deftest completion-recreates-expired-binding-before-releasing-admission
+  (let [{:keys [client ipc module-name calls bounded-release]} *context*
+        state (rama/foreign-pstate ipc module-name "$$completed-calls")
+        request {:prompt "completion-expiry" :call-id "completion-expiry"}
+        before (count @calls)
+        invoke (with-redefs [replay/binding-retention-ms 200]
+                 (let [invoke (aor/agent-initiate client request)]
+                   (is (eventually #(= (inc before) (count @calls))))
+                   invoke))]
+    (try
+      (is (eventually #(nil? (rama/foreign-select-one ["completion-expiry/0"] state))))
+      (deliver (get bounded-release "completion-expiry") true)
+      (is (= "one two" (:text (result-within client invoke))))
+      (is (some? (:result (rama/foreign-select-one ["completion-expiry/0"] state))))
+      (is (= "one two" (:text (aor/agent-invoke client request))))
+      (is (= 1 (- (count @calls) before)))
+      (finally (deliver (get bounded-release "completion-expiry") true)))))
 
 (defn failure-within [client invoke]
   (try (result-within client invoke) :unexpected-success

@@ -45,8 +45,8 @@ An identity and fingerprint share one in-flight model call across all workers of
 this module. Late joiners receive the text chunks already produced, then the
 remaining chunks and the same final response, tool calls and usage. Each caller
 retains its own Agent-o-rama trace. Identical callers still share a live call if
-the replay binding expires; a caller with a newer binding records the shared
-completion for its generation. Completed replay bypasses admission.
+the replay binding expires; the completion depot records the shared result for
+the current matching binding before releasing admission. Completed replay bypasses admission.
 
 Configuration defaults are `:active-limit 10` and `:queue-limit 50`. These count
 distinct model rounds, across both model objects and every worker, not subscribers
@@ -118,11 +118,19 @@ and canonical path identify the lock domain. Replacing/removing the directory or
 changing its domain while generations are pending fails closed. Do not delete
 live lock files, use network filesystems, or place workers on different hosts.
 
-A worker's model `close` stops its pollers, but surviving asynchronous transports
+A worker's model `close` stops its pollers. Async reads check this stop signal
+every 100 milliseconds, so an outstanding old-client read cannot strand an
+undispatched owner's fence. Surviving asynchronous transports
 keep their fences. Recovery never steals a slot because a heartbeat or wall-clock
 lease expired. It can retire an orphan only after acquiring that generation's
-OS lock. Process death releases that lock. Queued work can transfer its fence to
-a retried owner while retaining its FIFO position. A local channel registry only
+OS lock. Process death releases that lock. Queued work and promoted but
+undispatched reservations can transfer their fence
+to a retried owner or an already-joined waiter while retaining FIFO position.
+Dispatch is marked durably under the fence immediately before entering the SDK.
+Caller leases last 180 seconds and renew every 15 seconds while waiting. This
+exceeds the tested 90-second update allowance. Only an unfenced, undispatched
+reservation with no unexpired caller lease may be retired as abandoned. Caller
+expiry never releases capacity held by a live transport. A local channel registry only
 prevents POSIX descriptor-close races; admission and cross-process exclusion do
 not depend on a JVM singleton.
 
@@ -137,8 +145,12 @@ maintenance, never while workers are running.
 Real IPC module replacement is tested with ten gated transports and two queued
 calls: replacement returns while the original transports remain held, capacity
 stays at ten, queued dispatch order survives, and every invocation completes after
-release. The public update can take more than 30 seconds; the test allows 90
-seconds while transport gates and SDK deadlines remain at 120 seconds. A separate
+release. A retired worker's depot client can close before its SDK callbacks
+commit remaining chunks or completion. That attempt is then recovered as worker
+loss after its transport terminates; Rama may make another upstream request.
+The fixture observed Rama's depot `assert-open` failure in this window. Already
+committed completion still replays without another request. The public update
+can take more than 30 seconds; the test allows 90 seconds while transport gates and SDK deadlines remain at 120 seconds. A separate
 OS subprocess test proves exclusion across processes and lock release after a
 hard process kill. IPC has no public persistent-cluster reopen/worker-kill API;
 this is not evidence of whole-machine reboot or disaster recovery. Deployment
@@ -149,10 +161,14 @@ validation remains tracked in [issue #5](https://github.com/jamiepratt/agent-o-r
 Fingerprint binding is an atomic Rama PState transformation before dispatch.
 A pending binding contains a digest, generation and one-hour expiry; it binds the
 identity even if the provider subsequently errors. Same-request retries remain
-allowed. Successful completion conditionally records the first response for that
-generation, starting a fresh one-hour replay period. A stale completion cannot
-overwrite a newer generation after expiry and reuse. Reading a replay never
-extends its expiry.
+allowed. Successful completion uses an independent depot, so persistence does
+not depend on the original agent invocation remaining active. Before admission
+releases its identity, the completion command records the first result for the current matching
+fingerprint, including a newer matching binding. If the binding expired and was
+removed, it creates a fresh generation. A different fingerprint or any existing
+result is never overwritten. Commands expire at completion time plus one hour;
+redelivery cannot renew that deadline or resurrect an expired response. Reading
+a replay never extends its expiry.
 
 Completed state contains the digest, generation, expiry, ordered text chunks,
 AI message and concrete response metadata, including tool calls and usage.
@@ -166,6 +182,7 @@ Hashes are not encryption and can reveal guessed low-entropy prompts.
 Lookups reject expired records. A Rama tick visits every task partition and
 removes expired entries even when idle, normally within the configured
 `:sweep-ms` interval (60 seconds by default). Pending bindings are removed too.
+Completion may restore a removed binding while its identical call is still live.
 This is active-state removal and one-hour replay eligibility, not a guarantee
 of physical deletion from every copy. Rama depot history, replication and
 backups have their own retention. Agent-o-rama already retains invocation
@@ -202,8 +219,9 @@ The fake counts HTTP requests into CLIProxyAPI's boundary, not provider attempts
 IPC module update uses [Rama's public worker replacement path](https://redplanetlabs.com/docs/~/operating-rama.html#_updating_modules) with retained
 PStates; it does not simulate a machine reboot or disaster recovery.
 
-Issue #3 regression coverage adds public gated IPC calls on two tasks, two
-threads and two workers: global 10/50 capacity and every FIFO promotion,
+Issue #3 validation, 2026-09-23: **29 Clojure tests, 477 assertions**, passing.
+Regression coverage includes public gated IPC calls on two tasks, two threads
+and two workers: global 10/50 capacity and every FIFO promotion,
 configured limits, late stream join, shared failures/timeouts, logical
 cancellation, expired bindings and cancellation tombstones, actual depot command
 redelivery, live worker replacement, and cross-process OS fences.
@@ -213,7 +231,7 @@ redelivery, live worker replacement, and cross-process OS fences.
 | In-flight sharing | Two HTTP requests for identical callers | One request; late subscriber catches up before release |
 | Global admission | 59 transports started while ten were gated | Ten active; fifty FIFO queued; typed overflow before release |
 | Cancellation | Missing cancel agent; agent-scoped callback writes rejected after cancellation | All waiters finish; dedicated depot releases capacity only on transport terminal |
-| Worker replacement | Thirty-second update deadline expired | Ninety-second bounded update retains ten active transports and queued order |
+| Worker replacement | Serial release dispatched queued request 11 before 10 and retried request 0 | Distinguish reservations from dispatched transports; adopt pending ownership and persist completion through an independent depot |
 | Command redelivery | Duplicate chunks and resurrected retired generation | Atomic command receipts suppress duplicates and reject expired events |
 | Binding expiry | Identical late caller started a second request | Live call shared across binding expiry; subsequent completed replay remains one request |
 | Cancellation expiry | Retried caller failed; terminal did not renew cancellation | Pending cancelled transport retains cancellation and terminal extends expiry |
