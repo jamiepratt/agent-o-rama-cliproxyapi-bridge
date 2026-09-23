@@ -137,5 +137,17 @@ boolean/numeric schema was implemented.
 separate readiness probe and scrape. It verifies retries, replay, error counts,
 probe separation and SDK-versus-forwarder count relationships. The forwarder
 counts chat-completion POSTs; model-visibility GETs are excluded. Its fixed evidence
-schema rejects unknown fields and textual payloads. Live results are recorded
-only after the coordinator runs this harness successfully.
+schema rejects unknown fields and textual payloads.
+
+Validation on 2026-09-23: the complete Clojure suite passed **36 tests, 536
+assertions**, with zero failures or errors. All five Python regressions passed;
+Clojure repair and lint were clean.
+
+The authenticated live harness passed all seven compatibility scenarios plus
+observability at **2026-09-23T12:11:29Z**. The [redacted evidence](adapter-evidence.json)
+records available/configured/verified all true, a timestamped result and a
+successful scrape: **13 model attempts, 12 SDK dispatches, 1 replay, 5 observed
+retries and 6 upstream errors**. The separate verification probe made one
+chat-completion request and did not increment adapter counters. Forced Rama retry
+used one proxy request, two model traces and one stream reset. The daemon and
+test JVM were stopped after validation.
