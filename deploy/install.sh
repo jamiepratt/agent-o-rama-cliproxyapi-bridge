@@ -23,7 +23,15 @@ for unit in "$source_dir/systemd/"*.service; do
 done
 # Operator must verify console rescue and Tailscale SSH access before this gate.
 tailscale status --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["BackendState"] == "Running"'
-if nft list table inet bridge >/dev/null 2>&1; then echo 'Existing bridge firewall; refusing overwrite.' >&2; exit 1; fi
+# Listing a named table conflates absence with inspection/parser failures.
+# Require a successful complete inventory before deciding installation is safe.
+nft -j list tables | python3 -c '
+import json,sys
+tables=json.load(sys.stdin)["nftables"]
+if any(entry.get("table", {}).get("family") == "inet" and
+       entry["table"].get("name") == "bridge_private" for entry in tables):
+    sys.exit("Existing bridge firewall; refusing overwrite.")
+'
 # Verify cached artifacts only. The root installer never downloads code.
 python3 - "$source_dir" "$cache" "$module_jar" "$module_hash" <<'PY'
 import json,sys
