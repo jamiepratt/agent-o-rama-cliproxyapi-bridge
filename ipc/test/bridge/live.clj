@@ -101,7 +101,7 @@
               recovery (measured "recovery" #(stream-probe ipc module-name client {:prompt "Reply with exactly OK."}))]
           (check! (= 2 (:proxy_requests tool)) "tool-roundtrip-count")
           (check! (= 1 (:tool_requests tool)) "tool-request-count")
-          (check! (= 2 (:proxy_requests retry)) "rama-retry-count")
+          (check! (= 1 (:proxy_requests retry)) "rama-retry-count")
           (check! (= 1 (:stream_resets retry)) "rama-stream-reset")
           {:agent_o_rama "0.10.0" :rama "1.9.0" :langchain4j "1.18.1-beta28"
            :stream normal :tool tool :retry retry :error error :timeout timeout

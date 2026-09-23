@@ -145,7 +145,7 @@ def main():
         evidence.update({'recorded_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
                          'cliproxy_version': cliproxy.VERSION,
                          'model': 'gpt-6-luna', 'counter_boundary': 'HTTP requests forwarded to CLIProxyAPI'})
-        (ROOT / 'ipc/evidence.json').write_text(json.dumps(evidence, indent=2) + '\n')
+        (ROOT / 'ipc/adapter-evidence.json').write_text(json.dumps(evidence, indent=2) + '\n')
         print(json.dumps(evidence, indent=2))
     finally:
         if forwarder:

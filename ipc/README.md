@@ -1,7 +1,8 @@
 # Agent-o-rama IPC compatibility spike
 
 Tracking: [issue #2](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/2).
-This is an experiment, not the reliability adapter or a deployment.
+This document records the original experiment. The module now includes
+[durable completed replay](REPLAY.md); this remains an IPC harness, not a deployment.
 
 ## Pinned runtime
 
@@ -29,7 +30,7 @@ python3 ipc/run_live.py
 
 Run the controllable fake first. The live command reuses the dedicated account
 login and private state documented in the direct spike. It writes only validated,
-redacted measurements to `ipc/evidence.json` and always terminates its daemon.
+redacted adapter measurements to `ipc/adapter-evidence.json` and always terminates its daemon.
 It refuses an occupied daemon port and validates binary checksum, private file
 permissions, bearer protection, and the loopback listener before invoking Clojure.
 No UI or production service is started.
@@ -128,7 +129,7 @@ attempt counts, deduplication, or billing.
 
 Decision: **GO for the thin reliability adapter preserving these observed
 semantics**, including subscription cancellation. Completed replay is justified
-by the measured second call after Rama retry; that work remains in
+by the measured second call after Rama retry; that behavior is now implemented in [the replay adapter](REPLAY.md), tracked by
 [issue #6](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/6).
 
 **NO-GO for upstream generation cancellation or billing-cessation guarantees.**
