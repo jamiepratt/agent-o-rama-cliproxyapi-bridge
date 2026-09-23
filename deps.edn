@@ -1,6 +1,7 @@
 {:paths ["ipc/src" "ipc/resources"]
  :mvn/repos {"rpl" {:url "https://nexus.redplanetlabs.com/repository/maven-public-releases"}}
- :deps {org.clojure/data.json {:mvn/version "2.5.1"}
+ :deps {com.google.code.gson/gson {:mvn/version "2.12.1"}
+        org.clojure/data.json {:mvn/version "2.5.1"}
         org.clojure/clojure {:mvn/version "1.12.4"}
         com.rpl/rama {:mvn/version "1.9.0"}
         com.rpl/agent-o-rama {:mvn/version "0.10.0"}

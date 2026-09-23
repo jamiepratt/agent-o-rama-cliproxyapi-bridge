@@ -1,0 +1,94 @@
+{
+  "retry": {
+    "proxy_requests": 1,
+    "tool_requests": 0,
+    "trace_usage_matches": true,
+    "chunks": 1,
+    "usage": {
+      "input": 307,
+      "output": 5,
+      "total": 312
+    },
+    "trace_model_calls": 2,
+    "complete": true,
+    "stream_resets": 1,
+    "content_chars": 2
+  },
+  "rama": "1.9.0",
+  "tool": {
+    "proxy_requests": 2,
+    "tool_requests": 1,
+    "trace_usage_matches": true,
+    "chunks": 1,
+    "usage": {
+      "input": 349,
+      "output": 5,
+      "total": 354
+    },
+    "trace_model_calls": 2,
+    "complete": true,
+    "stream_resets": 0,
+    "content_chars": 4
+  },
+  "stream": {
+    "proxy_requests": 1,
+    "tool_requests": 0,
+    "trace_usage_matches": true,
+    "chunks": 1,
+    "usage": {
+      "input": 307,
+      "output": 5,
+      "total": 312
+    },
+    "trace_model_calls": 1,
+    "complete": true,
+    "stream_resets": 0,
+    "content_chars": 2
+  },
+  "langchain4j": "1.18.1-beta28",
+  "cancellation": {
+    "subscription_closed_before_completion": true,
+    "agent_completed": true,
+    "callbacks_after_close": 0,
+    "usage": {
+      "input": 315,
+      "output": 503,
+      "total": 818
+    },
+    "upstream_termination_proven": false,
+    "billing_cessation_proven": false,
+    "proxy_requests": 1
+  },
+  "error": {
+    "error_observed": true,
+    "trace_failure": true,
+    "expected_failure_type": true,
+    "proxy_requests": 3
+  },
+  "timeout": {
+    "error_observed": true,
+    "trace_failure": true,
+    "expected_failure_type": true,
+    "proxy_requests": 3
+  },
+  "recovery": {
+    "proxy_requests": 1,
+    "tool_requests": 0,
+    "trace_usage_matches": true,
+    "chunks": 1,
+    "usage": {
+      "input": 307,
+      "output": 5,
+      "total": 312
+    },
+    "trace_model_calls": 1,
+    "complete": true,
+    "stream_resets": 0,
+    "content_chars": 2
+  },
+  "agent_o_rama": "0.10.0",
+  "recorded_utc": "2026-09-23T09:19:54Z",
+  "cliproxy_version": "7.3.15",
+  "model": "gpt-6-luna",
+  "counter_boundary": "HTTP requests forwarded to CLIProxyAPI"
+}

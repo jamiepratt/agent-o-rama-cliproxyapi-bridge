@@ -1,7 +1,7 @@
 # agent-o-rama-cliproxyapi-bridge
 
-Compatibility spike for a Clojure Agent-o-rama reliability adapter around CLIProxyAPI.
-The adapter is gated on [issue #7](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/7).
+Clojure Agent-o-rama completed-call replay around CLIProxyAPI.
+See [the replay contract and retention limits](ipc/REPLAY.md).
 
 See [the direct API spike](spike/README.md) for setup, validation and observed results.
 
