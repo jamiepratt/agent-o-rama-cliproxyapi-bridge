@@ -277,13 +277,23 @@ java -Xss6m -Xmx4g -Djdk.attach.allowAttachSelf \
 Run JVM suites serially. The runtime tests temporarily bind loopback port 18318; ensure it is unused
 before running. UI startup failure is injected at the external library boundary
 to avoid starting its wildcard listener on the developer machine. They generate no provider traffic.
-The existing conflict regression has a one-second result deadline. It failed
-in both an overlapping source-suite run and a serial packaged-suite run, while
-an isolated rerun passed. Concurrency alone has not been established as the cause.
-Keep those failures in the validation record; a passing narrow rerun is not a
-passing full suite.
+The in-flight conflict regression uses the suite's 15-second result bound and
+asserts the original invocation is still incomplete, its upstream gate is closed,
+and only one upstream request exists when the typed conflict arrives. The bound
+is a test harness limit, not a service latency guarantee.
 
-Validation record, 2026-09-23:
+Issue #14 investigation reproduced the old one-second assertion failure in a
+serial source run: 39 tests, 548 assertions, one failure, zero errors; the exact
+exception was `java.util.concurrent.TimeoutException`. Twelve isolated conflicts
+passed the old bound (about 415-863 ms). A diagnostic full-order run retained the
+same future and held the original request after the timeout: the second invocation
+was not complete at the timeout check; the typed identity conflict was retrieved
+from the same future by about 1,100 ms, including diagnostic reads, with the
+original incomplete, its gate unreleased and exactly one upstream request. This establishes an invalid one-second end-to-end test
+assumption; it does not isolate a scheduler cause or prove proxy-only delivery
+lag. No product code or conflict contract changed.
+
+Original deployment-preparation validation record, 2026-09-23:
 
 - Final serial source suite: **39 tests, 548 assertions, zero failures/errors**.
 - New runtime namespace: **3 tests, 12 assertions**, including real IPC invocation
@@ -294,9 +304,9 @@ Validation record, 2026-09-23:
   in the existing one-second in-flight conflict result assertion, zero errors.
   All other assertions passed. An earlier overlapping source full run had the same
   failure; its isolated unchanged rerun passed all three assertions. The final
-  serial source full run passed. Cause remains unresolved and is tracked in
-  [issue #14](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/14); the assertion is still
-  one second and now reports the caught exception class for future diagnosis.
+  serial source full run passed. At that point the cause was unresolved, tracked in
+  [issue #14](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/14); the original assertion used
+  one second and reported the caught exception class for diagnosis.
   This record does **not** claim a passing full packaged suite.
 - Seven Python tests passed (two deployment guards/checksums, two IPC evidence
   schema checks, three direct-spike regressions); shell syntax, Clojure repair,
@@ -313,3 +323,16 @@ recorded in commit `e69fc67f5cc3c6f368dfb9731da0f4b774730895` (base
 `b1160da0950687f60bd8fb25995b3dc93f6c6def120ac00a0d513bfb24919f8b`.
 The generated JAR is ignored by Git. Record a fresh hash if rebuilding; this build
 does not claim timestamp-independent byte-for-byte reproducibility.
+
+Issue #14 follow-up validation, 2026-09-23, test commit
+`91b02069067cebe4ad7825e878e3c3e5cf81792e`:
+
+- Narrow conflict regression: **1 test, 8 assertions, zero failures/errors**.
+- Serial source full suite: **39 tests, 553 assertions, zero failures/errors**.
+- Serial actual-distribution packaged full suite: **39 tests, 553 assertions,
+  zero failures/errors**. This supersedes the earlier packaged failure above.
+- Repair, lint, Maven package and `git diff --check` passed. Source and packaged
+  suites cover cancellation, streaming, admission, replay and runtime cleanup.
+- Fresh Rama archive matched the pinned SHA-256. Fresh module JAR SHA-256:
+  `af94b94d59dbd03ec0ff774d684a06f2f87c02418ceda99b0717f8beebd99f91`.
+- No provider calls, deployment, server or Tailscale changes were made.
