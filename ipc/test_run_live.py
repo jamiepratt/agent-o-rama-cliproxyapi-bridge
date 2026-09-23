@@ -14,6 +14,9 @@ def safe_record():
     return {'agent_o_rama': '0.10.0', 'rama': '1.9.0', 'langchain4j': '1.18.1-beta28',
             **{name: copy.deepcopy(stream) for name in ('stream', 'tool', 'retry', 'recovery')},
             **{name: copy.deepcopy(error) for name in ('error', 'timeout')},
+            'observability': {'available': True, 'configured': True, 'verified': True, 'timestamped': True,
+                              'scrape_success': True, 'requests': 13, 'dispatches': 12, 'replays': 1,
+                              'retries': 5, 'upstream_errors': 6, 'probe_requests': 1},
             'cancellation': {'subscription_closed_before_completion': True,
                              'agent_completed': True, 'callbacks_after_close': 0,
                              'usage': {'input': 3, 'output': 2, 'total': 5},
@@ -24,7 +27,7 @@ def safe_record():
 class EvidenceBoundaryTests(unittest.TestCase):
     def test_only_fixed_fields_and_numeric_usage_reach_evidence(self):
         self.assertEqual(checked_evidence(safe_record()), safe_record())
-        for location in ((), ('stream',), ('stream', 'usage')):
+        for location in ((), ('stream',), ('stream', 'usage'), ('observability',)):
             value = safe_record()
             target = value
             for key in location:

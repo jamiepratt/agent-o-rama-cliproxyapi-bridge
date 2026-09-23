@@ -5,6 +5,7 @@
             [com.rpl.rama :as rama]
             [com.rpl.rama.test :as rtest]
             [bridge.module :as module]
+            [bridge.observability :as obs]
             [bridge.inspect :as inspect])
   (:import [java.util.concurrent TimeUnit]))
 
@@ -77,6 +78,36 @@
            :upstream_termination_proven false :billing_cessation_proven false}))
       (finally (.close stream)))))
 
+(defn observer-probe [ipc module-name base model scenarios]
+  (reset! stage "observability")
+  (let [state (rama/foreign-pstate ipc module-name "$$admission")
+        observer (obs/start! {:snapshot #(rama/foreign-select-one ["admission"] state)
+                              :configured? true :base-url (str base "/v1") :model model
+                              :timeout-ms 15000})
+        before (counter base)]
+    (try
+      (let [ready (obs/refresh! observer)
+            text (slurp (str "http://127.0.0.1:" (:port observer) "/metrics"))
+            metric (fn [name] (Long/parseLong (second (re-find (re-pattern (str "(?m)^bridge_" name "_total ([0-9]+)$")) text))))]
+        (check! (and (:available ready) (:configured ready) (:verified ready) (integer? (:checked-at ready))) "readiness-verified")
+        (let [forwarded (reduce + (map :proxy_requests (vals scenarios)))
+              dispatches (metric "upstream_dispatches")
+              errors (metric "upstream_errors")
+              forwarded-errors (+ (get-in scenarios [:error :proxy_requests]) (get-in scenarios [:timeout :proxy_requests]))]
+          (check! (and (<= forwarded dispatches)
+                       (<= (- dispatches forwarded) (metric "upstream_timeouts"))
+                       (= (- dispatches forwarded) (- errors forwarded-errors))
+                       (= (inc dispatches) (metric "requests")) (= 1 (metric "replay_hits"))
+                       (= (dec errors) (metric "observed_retries"))
+                       (= 1 (- (counter base) before))
+                       (str/includes? text "bridge_verification_status 1")) "metrics-observed"))
+        {:available (:available ready) :configured (:configured ready) :verified (:verified ready)
+         :timestamped (integer? (:checked-at ready)) :scrape_success true
+         :requests (metric "requests") :dispatches (metric "upstream_dispatches")
+         :replays (metric "replay_hits") :retries (metric "observed_retries")
+         :upstream_errors (metric "upstream_errors") :probe_requests (- (counter base) before)})
+      (finally (obs/stop! observer)))))
+
 (defn run-probes []
   (let [base (System/getenv "IPC_BASE_URL") model (System/getenv "IPC_MODEL")]
     (with-open [ipc (rtest/create-ipc)]
@@ -104,6 +135,9 @@
           (check! (= 1 (:proxy_requests retry)) "rama-retry-count")
           (check! (= 1 (:stream_resets retry)) "rama-stream-reset")
           {:agent_o_rama "0.10.0" :rama "1.9.0" :langchain4j "1.18.1-beta28"
+           :observability (observer-probe ipc module-name base model
+                                          {:stream normal :tool tool :retry retry :error error :timeout timeout
+                                           :cancellation cancellation :recovery recovery})
            :stream normal :tool tool :retry retry :error error :timeout timeout
            :cancellation cancellation :recovery recovery})))))
 

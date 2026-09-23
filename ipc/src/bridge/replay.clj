@@ -3,6 +3,7 @@
   (:require [clojure.data.json :as json]
             [bridge.admission :as admission]
             [bridge.locks :as locks]
+            [bridge.metrics :as metrics]
             [clojure.walk :as walk]
             [com.rpl.agent-o-rama :as aor]
             [com.rpl.rama :as rama]
@@ -112,64 +113,76 @@
       (listeners [_] (.listeners upstream))
       (supportedCapabilities [_] (.supportedCapabilities upstream))
       (doChat [_ request handler]
-        (let [{:keys [node identity call-id]} *call*
-              _ (admission/check-cancelled! node call-id)
-              state (aor/get-store node "$$completed-calls")
-              digest (fingerprint request configuration)
-              entry (bind-call! state identity digest)
-              generation (:generation entry)
-              completed-depot (aor/get-depot node "*completed-changes")]
-          (when (not= digest (:fingerprint entry))
-            (throw (ex-info "Model-call identity conflicts with recorded request" {:type ::identity-conflict})))
-          (if (:result entry)
-            (do (doseq [chunk (:chunks entry)] (.onPartialResponse ^StreamingChatResponseHandler handler ^String chunk))
-                (.onCompleteResponse ^StreamingChatResponseHandler handler (decode-response (:result entry))))
-            (let [call (admission/join! node [identity digest] call-id options)
-                  original-error (atom nil)
-                  dispatch! (fn [call]
-                              (admission/await-turn! call)
-                              (try
-                                (if (let [current (admission/entry call)]
-                                      (when-not current (throw (ex-info "Admission generation expired" {:type :bridge.admission/generation-expired})))
-                                      (or (:cancelled? current) (:terminal? current)))
-                                  (admission/finish! call {:terminal? true :cancelled? true})
-                                  (if-let [saved-entry (let [latest (admission/await-operation (rama/foreign-select-one-async [identity] (store/get-underlying-pstate state)) (:stopped? call))] (when (and (:result latest) (= generation (:generation latest)) (= digest (:fingerprint latest))) latest))]
-                                    (let [saved (:result saved-entry)]
-                                      (doseq [chunk (:chunks saved-entry)] (admission/chunk! call chunk))
-                                      (admission/finish! call {:terminal? true :result saved}))
-                                    (if-not (admission/mark-dispatched! call)
+        (let [{:keys [node identity call-id observation-id]} *call*
+              metric-state (admission/open-state node)
+              started (System/nanoTime)]
+          (admission/change! metric-state #(metrics/begin % observation-id (System/currentTimeMillis)))
+          (try
+            (let [_ (admission/check-cancelled! node call-id)
+                  state (aor/get-store node "$$completed-calls")
+                  digest (fingerprint request configuration)
+                  entry (bind-call! state identity digest)
+                  generation (:generation entry)
+                  completed-depot (aor/get-depot node "*completed-changes")]
+              (when (not= digest (:fingerprint entry))
+                (admission/change! metric-state #(metrics/increment % :conflicts))
+                (throw (ex-info "Model-call identity conflicts with recorded request" {:type ::identity-conflict})))
+              (if (:result entry)
+                (do (admission/change! metric-state #(metrics/increment % :replays))
+                    (doseq [chunk (:chunks entry)] (.onPartialResponse ^StreamingChatResponseHandler handler ^String chunk))
+                    (.onCompleteResponse ^StreamingChatResponseHandler handler (decode-response (:result entry))))
+                (let [call (admission/join! node [identity digest] call-id options)
+                      original-error (atom nil)
+                      dispatch! (fn [call]
+                                  (admission/await-turn! call)
+                                  (try
+                                    (if (let [current (admission/entry call)]
+                                          (when-not current (throw (ex-info "Admission generation expired" {:type :bridge.admission/generation-expired})))
+                                          (or (:cancelled? current) (:terminal? current)))
                                       (admission/finish! call {:terminal? true :cancelled? true})
-                                      (.doChat upstream request
-                                               (reify StreamingChatResponseHandler
-                                                 (^void onPartialResponse [_ ^String chunk]
-                                                   (try (admission/chunk! call chunk)
-                                                        (catch Throwable error (compare-and-set! original-error nil error))))
-                                                 (onCompleteResponse [_ response]
-                                                   (try
-                                                     (when-let [error @original-error] (throw error))
-                                                     (let [result (encode-response response)
-                                                           completed-at (System/currentTimeMillis)
-                                                           current (admission/entry call)
-                                                           chunks (:chunks current)]
-                                                       (when-not (:cancelled? current)
-                                                         (rama/foreign-append! completed-depot
-                                                                               {:identity identity :fingerprint digest :generation (str (UUID/randomUUID))
-                                                                                :result result :chunks chunks :expires-at (+ completed-at retention-ms)}))
-                                                       (admission/finish! call {:terminal? true :result result}))
-                                                     (catch Throwable error
+                                      (if-let [saved-entry (let [latest (admission/await-operation (rama/foreign-select-one-async [identity] (store/get-underlying-pstate state)) (:stopped? call))] (when (and (:result latest) (= generation (:generation latest)) (= digest (:fingerprint latest))) latest))]
+                                        (let [saved (:result saved-entry)]
+                                          (admission/change! metric-state #(metrics/increment % :replays))
+                                          (doseq [chunk (:chunks saved-entry)] (admission/chunk! call chunk))
+                                          (admission/finish! call {:terminal? true :result saved}))
+                                        (if-not (admission/mark-dispatched! call)
+                                          (admission/finish! call {:terminal? true :cancelled? true})
+                                          (.doChat upstream request
+                                                   (reify StreamingChatResponseHandler
+                                                     (^void onPartialResponse [_ ^String chunk]
+                                                       (try (admission/chunk! call chunk)
+                                                            (catch Throwable error (compare-and-set! original-error nil error))))
+                                                     (onCompleteResponse [_ response]
+                                                       (try
+                                                         (when-let [error @original-error] (throw error))
+                                                         (let [result (encode-response response)
+                                                               completed-at (System/currentTimeMillis)
+                                                               current (admission/entry call)
+                                                               chunks (:chunks current)]
+                                                           (when-not (:cancelled? current)
+                                                             (rama/foreign-append! completed-depot
+                                                                                   {:identity identity :fingerprint digest :generation (str (UUID/randomUUID))
+                                                                                    :result result :chunks chunks :expires-at (+ completed-at retention-ms)}))
+                                                           (admission/finish! call {:terminal? true :result result}))
+                                                         (catch Throwable error
+                                                           (reset! original-error error)
+                                                           (admission/finish! call {:terminal? true :error (.getName (class error))}))))
+                                                     (onError [_ error]
                                                        (reset! original-error error)
-                                                       (admission/finish! call {:terminal? true :error (.getName (class error))}))))
-                                                 (onError [_ error]
-                                                   (reset! original-error error)
-                                                   (admission/finish! call {:terminal? true :error (.getName (class error))})))))))
-                                (catch Throwable error
-                                  (reset! original-error error)
-                                  (admission/finish! call {:terminal? true :error (.getName (class error))}))))]
-              (when (:owner? call) (dispatch! call))
-              (let [outcome (admission/await! call #(.onPartialResponse ^StreamingChatResponseHandler handler ^String %) dispatch!)]
-                (if (:cancelled? outcome)
-                  (.onError ^StreamingChatResponseHandler handler (ex-info "Model call was cancelled" {:type :bridge.admission/cancelled}))
-                  (if-let [error (:error outcome)]
-                    (.onError ^StreamingChatResponseHandler handler
-                              (or @original-error (ex-info "Shared upstream call failed" {:type ::upstream-failure :cause-class error})))
-                    (.onCompleteResponse ^StreamingChatResponseHandler handler (decode-response (:result outcome)))))))))))))
+                                                       (admission/finish! call {:terminal? true :upstream-error? true
+                                                                                :timeout? (metrics/timeout? error)
+                                                                                :error (.getName (class error))})))))))
+                                    (catch Throwable error
+                                      (reset! original-error error)
+                                      (admission/finish! call {:terminal? true :error (.getName (class error))}))))]
+                  (when (:owner? call) (dispatch! call))
+                  (let [outcome (admission/await! call #(.onPartialResponse ^StreamingChatResponseHandler handler ^String %) dispatch!)]
+                    (if (:cancelled? outcome)
+                      (.onError ^StreamingChatResponseHandler handler (ex-info "Model call was cancelled" {:type :bridge.admission/cancelled}))
+                      (if-let [error (:error outcome)]
+                        (.onError ^StreamingChatResponseHandler handler
+                                  (or @original-error (ex-info "Shared upstream call failed" {:type ::upstream-failure :cause-class error})))
+                        (.onCompleteResponse ^StreamingChatResponseHandler handler (decode-response (:result outcome)))))))))
+            (finally
+              (let [seconds (/ (- (System/nanoTime) started) 1e9)]
+                (admission/change! metric-state #(metrics/elapsed % seconds))))))))))

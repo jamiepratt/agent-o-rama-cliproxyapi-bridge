@@ -1,6 +1,7 @@
 (ns bridge.admission
   "Module-wide in-flight generations in one atomic Rama partition."
   (:require [bridge.locks :as locks]
+            [bridge.metrics :as metrics]
             [com.rpl.agent-o-rama :as aor]
             [com.rpl.agent-o-rama.store :as store]
             [com.rpl.rama :as rama])
@@ -61,10 +62,10 @@
   (if (cancelled? state call-id now)
     (assoc-in state [:waiters candidate] :cancelled)
     (if-let [generation (get-in state [:identities identity])]
-      (assoc-in state [:waiters candidate] generation)
+      (assoc-in (metrics/increment state :coalesces) [:waiters candidate] generation)
       (let [active? (< (count (:active state)) active-limit)]
         (if (and (not active?) (>= (count (:queue state)) queue-limit))
-          (assoc-in state [:waiters candidate] :overloaded)
+          (assoc-in (metrics/increment state :overloads) [:waiters candidate] :overloaded)
           (-> state
               (assoc-in [:waiters candidate] candidate)
               (assoc-in [:identities identity] candidate)
@@ -145,7 +146,8 @@
 (defn mark-dispatched! [{:keys [state generation] :as call}]
   (change! state #(let [current (get-in % [:entries generation])]
                     (if (and current (not (:terminal? current)) (not (:cancelled? current)))
-                      (assoc-in % [:entries generation :dispatched?] true) %)))
+                      (cond-> (assoc-in % [:entries generation :dispatched?] true)
+                        (not (:dispatched? current)) (metrics/increment :dispatches)) %)))
   (let [current (entry call)]
     (when-not current (throw (ex-info "Admission generation expired" {:type ::generation-expired})))
     (and (:dispatched? current) (not (:terminal? current)) (not (:cancelled? current)))))
@@ -185,7 +187,9 @@
     (if (or (nil? entry) (:terminal? entry))
       current
       (let [was-active? (contains? (:active current) generation)
-            next (-> current
+            next (-> (cond-> current
+                       (:upstream-error? terminal) (metrics/increment :upstream-errors)
+                       (:timeout? terminal) (metrics/increment :timeouts))
                      (update :identities dissoc (:identity entry))
                      (update :active disj generation)
                      (update :queue #(vec (remove #{generation} %)))
@@ -258,6 +262,7 @@
                                        (<= (get-in current [:waiter-expires candidate] 0) now))]
                          candidate))]
     (-> current
+        (update :observations #(into {} (remove (fn [[_ deadline]] (<= deadline now))) %))
         (update :entries #(apply dissoc % expired))
         (update :waiters #(apply dissoc % abandoned))
         (update :waiter-expires #(apply dissoc % abandoned))
