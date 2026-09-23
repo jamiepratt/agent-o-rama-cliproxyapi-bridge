@@ -499,16 +499,22 @@
         before (count @calls)
         first-call (aor/agent-initiate client {:prompt "identity-race" :call-id "in-flight"})]
     (try
-      (loop [remaining 200]
-        (when (and (= before (count @calls)) (pos? remaining))
-          (Thread/sleep 10) (recur (dec remaining))))
-      (is (= (inc before) (count @calls)))
+      (is (eventually #(= (inc before) (count @calls))))
+      (is (not (aor/agent-invoke-complete? client first-call)))
       (let [second-call (aor/agent-initiate client {:prompt "different" :call-id "in-flight"})
-            result (try (.get (aor/agent-result-async client second-call) 1 TimeUnit/SECONDS)
-                        (catch Exception error {:unexpected-exception (.getName (class error))}))]
-        (is (= {:error {:type :bridge.replay/identity-conflict}} result)))
+            ;; The gate proves overlap. A full-suite diagnostic observed a valid
+            ;; conflict by 1.10s, after the former one-second deadline expired.
+            result (try (result-within client second-call)
+                        (catch Exception error
+                          {:unexpected-exception (.getName (class error))
+                           :first-released? (realized? race-release)
+                           :upstream-dispatches (- (count @calls) before)}))]
+        (is (= {:error {:type :bridge.replay/identity-conflict}} result))
+        (is (not (realized? race-release)))
+        (is (not (aor/agent-invoke-complete? client first-call)))
+        (is (= 1 (- (count @calls) before))))
       (finally (deliver race-release true)))
-    (aor/agent-result client first-call)
+    (is (= "one two" (:text (result-within client first-call))))
     (is (= 1 (- (count @calls) before)))))
 
 (defn streamed-result [client request]
