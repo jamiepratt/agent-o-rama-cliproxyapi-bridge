@@ -6,7 +6,9 @@
         com.rpl/rama {:mvn/version "1.9.0"}
         com.rpl/agent-o-rama {:mvn/version "0.10.0"}
         dev.langchain4j/langchain4j-open-ai-official {:mvn/version "1.18.1-beta28"}}
- :aliases {:live {:extra-paths ["ipc/test"]
+ :aliases {:commands-test {:extra-paths ["ipc/test"]
+                           :main-opts ["-m" "bridge.commands-test"]}
+           :live {:extra-paths ["ipc/test"]
                   :jvm-opts ["-Xss6m" "-Xmx4g" "-Djdk.attach.allowAttachSelf"]
                   :main-opts ["-m" "bridge.live"]}
            :test {:extra-paths ["ipc/test"]
