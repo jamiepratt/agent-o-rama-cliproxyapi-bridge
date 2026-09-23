@@ -1,6 +1,6 @@
 # Dedicated host only. Never flush the operator's existing ruleset.
 # inet protects both IPv4 and IPv6. Rama host settings are not bind restrictions.
-table inet bridge {
+table inet bridge_private {
   chain input {
     type filter hook input priority 10; policy drop;
     iifname "lo" accept

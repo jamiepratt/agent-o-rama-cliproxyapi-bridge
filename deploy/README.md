@@ -2,8 +2,9 @@
 
 [Issue #5 remains open](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/5).
 These are reviewable installation artifacts, not an accepted production deployment.
-Local preparation and validation ran on macOS. No production login or target
-Linux service/firewall validation was performed during local validation. Production approval, device login,
+Initial preparation and validation ran on macOS. Subsequent Ubuntu 24.04
+check-only validation covered firewall syntax and systemd unit parsing; services
+were not yet installed or started. Production approval, device login,
 network isolation, memory/update, reboot and recovery acceptance remain in #5;
 [the complete acceptance story is #8](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/8).
 
@@ -40,7 +41,8 @@ The root-owned runtime payload is in `/opt/bridge/releases/`, with `current`
 pointing at the pinned three-runtime release. Content-addressed submitted jars
 live in `/opt/bridge/modules/`; `module.jar` points to the last successful deploy.
 Installer refuses an existing `/opt/bridge`, `/etc/bridge`, service account or
-`inet bridge` firewall table. It never imports a local OAuth credential.
+`inet bridge_private` firewall table. It never imports a local OAuth credential.
+Firewall inspection must succeed before installation proceeds.
 
 ## Host boundary
 
@@ -59,6 +61,12 @@ and complete the human device login before running the host installer.
 Before installation, approve cost/region, arrange provider rescue-console access,
 complete Tailscale device login, and verify a second SSH session over Tailscale.
 Review `config/firewall.nft` together with the host's existing nftables rules.
+Ubuntu 24.04's nftables 1.0.9 rejects the reserved table name `bridge`, even
+quoted. The policy uses `bridge_private`; its check-only regression runs the
+real parser/kernel validation and verifies that the ruleset remains unchanged:
+`sudo python3 -B -m unittest discover -s deploy/tests -p test_firewall.py`.
+This target check does not establish network isolation until the policy is applied
+and external reachability is tested.
 It adds its own table without flushing existing policy. Its drop policy applies
 to IPv4 and IPv6; it permits established traffic, loopback, ICMP, DHCP and
 Tailscale UDP 41641. Only TCP 22/1974/8888 is admitted on `tailscale0`. Tailscale's
