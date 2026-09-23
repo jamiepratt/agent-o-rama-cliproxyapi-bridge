@@ -203,8 +203,7 @@ Fresh responses stream immediately. Replay emits the original text chunks
 through the same Agent-o-rama instrumentation; model traces and returned usage
 remain available. Replayed usage describes the original response, not another
 charge. Summing logical model traces does not measure actual provider cost.
-[Issue #4](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/4)
-tracks provider observability. Errors are not cached as successful results.
+[Private readiness and metrics](OBSERVABILITY.md) expose adapter-owned observations. Errors are not cached as successful results.
 Closing a subscription stops callbacks but does not terminate upstream generation
 or prove billing cessation. The tool agent executes again during a replayed tool exchange; the fixture is
 pure echo. Completed model replay does not deduplicate external tool side effects.

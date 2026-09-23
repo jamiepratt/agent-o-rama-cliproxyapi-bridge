@@ -30,6 +30,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        if self.path == '/v1/models':
+            self.forward('GET')
+            return
         if self.path != '/count':
             self.send_error(404)
             return
@@ -43,12 +46,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.path != '/v1/chat/completions':
             self.send_error(404)
             return
-        payload = self.rfile.read(int(self.headers['Content-Length']))
-        with self.server.lock:
-            self.server.calls += 1
+        self.forward('POST')
+
+    def forward(self, method):
+        payload = self.rfile.read(int(self.headers['Content-Length'])) if method == 'POST' else None
+        if method == 'POST':
+            with self.server.lock:
+                self.server.calls += 1
         conn = http.client.HTTPConnection('127.0.0.1', cliproxy.PORT, timeout=120)
         try:
-            conn.request('POST', self.path, payload, {
+            conn.request(method, self.path, payload, {
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer ' + (cliproxy.STATE / 'bearer').read_text().strip()})
             response = conn.getresponse()
@@ -77,7 +84,10 @@ def checked_evidence(value):
     cancellation = {'subscription_closed_before_completion': bool, 'agent_completed': bool,
                     'callbacks_after_close': int, 'usage': dict, 'upstream_termination_proven': bool,
                     'billing_cessation_proven': bool, 'proxy_requests': int}
-    schemas = {'stream': stream, 'tool': stream, 'retry': stream, 'error': failure,
+    observability = {'available': bool, 'configured': bool, 'verified': bool, 'timestamped': bool,
+                     'scrape_success': bool, 'requests': int, 'dispatches': int, 'replays': int,
+                     'retries': int, 'upstream_errors': int, 'probe_requests': int}
+    schemas = {'observability': observability, 'stream': stream, 'tool': stream, 'retry': stream, 'error': failure,
                'timeout': failure, 'cancellation': cancellation, 'recovery': stream}
     if type(value) is not dict or set(value) != set(versions) | set(schemas):
         raise ValueError('Unexpected evidence fields')
@@ -138,13 +148,13 @@ def main():
                        'tool-result', 'tool-arguments', 'callbacks-after-close', 'nested-chunks', 'nested-order', 'numeric-usage', 'model-trace', 'trace-usage',
                        'agent-error', 'error-trace', 'failure-type', 'cancellation-first-chunk',
                        'subscription-closed-before-completion', 'completion-after-unsubscribe',
-                       'tool-roundtrip-count', 'tool-request-count', 'rama-retry-count', 'rama-stream-reset'}
+                       'observability', 'readiness-verified', 'metrics-observed', 'tool-roundtrip-count', 'tool-request-count', 'rama-retry-count', 'rama-stream-reset'}
             print(json.dumps({'failed_stage': stage if stage in allowed else 'unclassified'}))
             raise SystemExit(1)
         evidence = checked_evidence(json.loads(child.stdout))
         evidence.update({'recorded_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
                          'cliproxy_version': cliproxy.VERSION,
-                         'model': 'gpt-6-luna', 'counter_boundary': 'HTTP requests forwarded to CLIProxyAPI'})
+                         'model': 'gpt-6-luna', 'counter_boundary': 'Chat completion HTTP requests forwarded to CLIProxyAPI'})
         (ROOT / 'ipc/adapter-evidence.json').write_text(json.dumps(evidence, indent=2) + '\n')
         print(json.dumps(evidence, indent=2))
     finally:

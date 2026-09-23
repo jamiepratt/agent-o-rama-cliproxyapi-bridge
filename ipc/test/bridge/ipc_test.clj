@@ -8,6 +8,8 @@
             [com.rpl.rama :as rama]
             [com.rpl.rama.path :as path]
             [bridge.replay :as replay]
+            [bridge.observability :as obs]
+            [bridge.observability-test :as obs-test]
             [bridge.admission :as admission]
             [bridge.locks-test]
             [com.rpl.rama.test :as rtest]
@@ -236,9 +238,15 @@
       (is (= 1 (- (count @calls) before)))
       (finally (deliver (get bounded-release "expiry-cancel") true)))))
 
+(defn metric-value [observer metric]
+  (Double/parseDouble (second (re-find (re-pattern (str "(?m)^" metric " ([0-9.]+)$"))
+                                       (:body (obs-test/request (:port observer) "/metrics" "GET"))))))
+
 (deftest worker-replacement-recovers-queued-calls-with-live-transports-still-accounted
   (let [{:keys [client ipc module-name config calls bounded-release activity]} *context*
         state (rama/foreign-pstate ipc module-name "$$admission")
+        observer (obs/start! {:snapshot #(rama/foreign-select-one ["admission"] state)})
+        requests (metric-value observer "bridge_requests_total")
         before (count @calls)
         invocations (atom [])]
     (try
@@ -246,10 +254,15 @@
         (swap! invocations conj (aor/agent-initiate client {:prompt (str "restart-" n) :call-id (str "restart-" n)}))
         (is (eventually #(= (inc n) (count (remove :terminal? (vals (:entries (rama/foreign-select-one ["admission"] state)))))))))
       (is (eventually #(= 10 (- (count @calls) before))))
+      (is (= 10.0 (metric-value observer "bridge_active_calls")))
+      (is (= 2.0 (metric-value observer "bridge_queue_depth")))
       (let [updated (future (rtest/update-module! ipc (module/proxy-module config)) :updated)]
         (is (= :updated (deref updated 90000 :update-timeout)))
         (is (= 10 (- (count @calls) before)))
-        (is (= 10 (:maximum @activity))))
+        (is (= 10 (:maximum @activity)))
+        (is (= 10.0 (metric-value observer "bridge_active_calls")))
+        (is (= 2.0 (metric-value observer "bridge_queue_depth")))
+        (is (<= (+ requests 12) (metric-value observer "bridge_requests_total"))))
       ;; Free one slot at a time: simultaneous promotions may reach HTTP in
       ;; either order even though the durable queue admits them FIFO.
       (doseq [n (range 2)]
@@ -262,7 +275,7 @@
         (is (= (+ 11 n) (- (count @calls) before)))
         (is (= (str "restart-" (+ 10 n))
                (get-in (nth @calls (+ before 10 n)) [:messages 0 :content]))))
-      (finally (doseq [[key gate] bounded-release :when (str/starts-with? key "restart-")] (deliver gate true))))
+      (finally (obs/stop! observer) (doseq [[key gate] bounded-release :when (str/starts-with? key "restart-")] (deliver gate true))))
     (doseq [invoke @invocations]
       (is (= "one two" (:text (result-within client invoke)))))
     (is (= ["restart-10" "restart-11"]
@@ -281,19 +294,26 @@
   (let [{:keys [ipc module-name]} *context*
         depot (rama/foreign-depot ipc module-name "*admission-changes")
         state (rama/foreign-pstate ipc module-name "$$admission")
+        observer (obs/start! {:snapshot #(rama/foreign-select-one ["admission"] state)})
+        coalesces (metric-value observer "bridge_coalescing_total")
         generation "redelivery-fixture"
         now (System/currentTimeMillis)
         command (fn [f] {:key "admission" :id (str (java.util.UUID/randomUUID))
                          :expires-at (+ now 2000) :transform f})
         registration (command #(admission/register % ["redelivery" "binding"] "redelivery" generation
                                                    {:active-limit 10 :queue-limit 50} now))
+        join (command #(admission/register % ["redelivery" "binding"] "redelivery" "duplicate-redelivery"
+                                           {:active-limit 10 :queue-limit 50} now))
         chunk (command #(update-in % [:entries generation :chunks] conj "one"))
         retirement (assoc (command #(-> (admission/complete % generation {:terminal? true :expires-at (+ now 3600000)})
-                                        (update :waiters dissoc generation)
+                                        (update :waiters dissoc generation "duplicate-redelivery")
                                         (update :entries dissoc generation)))
                           :expires-at (+ now 3600000))]
     (try
       (is (= [:applied] (vec (vals (rama/foreign-append! depot registration)))))
+      (rama/foreign-append! depot join)
+      (rama/foreign-append! depot join)
+      (is (= 1.0 (- (metric-value observer "bridge_coalescing_total") coalesces)))
       (rama/foreign-append! depot chunk)
       (rama/foreign-append! depot chunk)
       (is (= ["one"] (rama/foreign-select-one ["admission" :entries generation :chunks] state)))
@@ -305,7 +325,7 @@
         (is (eventually #(nil? (rama/foreign-select-one [(:id registration)] receipts {:pkey "admission"})))))
       (is (= [:expired] (vec (vals (rama/foreign-append! depot registration)))))
       (is (nil? (rama/foreign-select-one ["admission" :entries generation] state)))
-      (finally (rama/foreign-append! depot retirement)))))
+      (finally (rama/foreign-append! depot retirement) (obs/stop! observer)))))
 
 (deftest identical-in-flight-call-survives-binding-expiry-and-replays-after-completion
   (let [{:keys [client ipc module-name calls bounded-release]} *context*
@@ -372,9 +392,16 @@
        (catch ExecutionException _ :failed)))
 
 (deftest rama-retry-replays-completed-call
-  (let [{:keys [client calls]} *context* before (count @calls)]
-    (is (= "one two" (:text (aor/agent-invoke client {:prompt "fixture" :force-retry? true}))))
-    (is (= 1 (- (count @calls) before)))))
+  (let [{:keys [client calls ipc module-name]} *context*
+        state (rama/foreign-pstate ipc module-name "$$admission")
+        observer (obs/start! {:snapshot #(rama/foreign-select-one ["admission"] state)})
+        retries (metric-value observer "bridge_observed_retries_total")
+        before (count @calls)]
+    (try
+      (is (= "one two" (:text (aor/agent-invoke client {:prompt "fixture" :force-retry? true}))))
+      (is (= 1.0 (- (metric-value observer "bridge_observed_retries_total") retries)))
+      (is (= 1 (- (count @calls) before)))
+      (finally (obs/stop! observer)))))
 
 (deftest tool-roundtrip-returns-executed-result-to-model
   (let [{:keys [client calls]} *context* before (count @calls)]
@@ -556,8 +583,34 @@
            (replay/fingerprint (request (into (array-map) [b a])) {:b 2 :a 1}))))
   (is (= 3600000 replay/retention-ms)))
 
+(deftest observer-counts-global-model-outcomes
+  (let [{:keys [client ipc module-name]} *context*
+        state (rama/foreign-pstate ipc module-name "$$admission")
+        observer (obs/start! {:snapshot #(rama/foreign-select-one [admission/state-key] state)})
+        scrape #(:body (obs-test/request (:port observer) "/metrics" "GET"))
+        value (fn [metric] (Double/parseDouble (or (second (re-find (re-pattern (str "(?m)^" metric " ([0-9.]+)$")) (scrape))) "0")))
+        before (into {} (for [metric ["bridge_requests_total" "bridge_replay_hits_total" "bridge_conflicts_total" "bridge_observed_retries_total" "bridge_upstream_dispatches_total" "bridge_request_duration_seconds_count"]] [metric (value metric)]))]
+    (try
+      (aor/agent-invoke client {:prompt "fixture" :call-id "metrics-one"})
+      (aor/agent-invoke client {:prompt "fixture" :call-id "metrics-one"})
+      (aor/agent-invoke client {:prompt "different-sensitive-prompt" :call-id "metrics-one"})
+      (is (= 3.0 (- (value "bridge_requests_total") (before "bridge_requests_total"))))
+      (is (= 1.0 (- (value "bridge_replay_hits_total") (before "bridge_replay_hits_total"))))
+      (is (= 1.0 (- (value "bridge_conflicts_total") (before "bridge_conflicts_total"))))
+      (is (= (before "bridge_observed_retries_total") (value "bridge_observed_retries_total")))
+      (is (= 1.0 (- (value "bridge_upstream_dispatches_total") (before "bridge_upstream_dispatches_total"))))
+      (is (= 3.0 (- (value "bridge_request_duration_seconds_count") (before "bridge_request_duration_seconds_count"))))
+      (let [counts (map #(Double/parseDouble (second %))
+                        (re-seq #"(?m)^bridge_request_duration_seconds_bucket\{le=\"[^\"]+\"\} ([0-9.]+)$" (scrape)))]
+        (is (= 9 (count counts)))
+        (is (apply <= counts))
+        (is (= (last counts) (value "bridge_request_duration_seconds_count"))))
+      (is (not (str/includes? (scrape) "different-sensitive-prompt")))
+      (is (not (str/includes? (scrape) "metrics-one")))
+      (finally (obs/stop! observer)))))
+
 (defn -main [& _]
   (require 'bridge.admission-config-test)
-  (let [{:keys [fail error]} (run-tests 'bridge.ipc-test 'bridge.admission-config-test 'bridge.locks-test)]
+  (let [{:keys [fail error]} (run-tests 'bridge.ipc-test 'bridge.admission-config-test 'bridge.locks-test 'bridge.observability-test)]
     (shutdown-agents)
     (System/exit (if (zero? (+ fail error)) 0 1))))

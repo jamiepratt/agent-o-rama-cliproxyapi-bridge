@@ -29,9 +29,9 @@
                                             {"value" (schema/string)}))
    (fn [args] (get args "value"))))
 
-(defn model-roundtrip [node prompt tool? timeout? model-name identity]
+(defn model-roundtrip [node prompt tool? timeout? model-name identity observation-id]
   (let [model (aor/get-agent-object node (if timeout? "deadline-model" "model"))
-        response (binding [replay/*call* {:node node :call-id identity :identity (str identity "/0")}]
+        response (binding [replay/*call* {:node node :call-id identity :identity (str identity "/0") :observation-id (when observation-id (str observation-id "/0"))}]
                    (lc4j/chat model
                               (lc4j/chat-request [prompt]
                                                  (cond-> {}
@@ -42,7 +42,7 @@
     (if (seq calls)
       (let [_ (admission/check-cancelled! node identity)
             results (aor/agent-invoke (aor/agent-client node "tools") calls)]
-        (binding [replay/*call* {:node node :call-id identity :identity (str identity "/1")}]
+        (binding [replay/*call* {:node node :call-id identity :identity (str identity "/1") :observation-id (when observation-id (str observation-id "/1"))}]
           (lc4j/chat model (lc4j/chat-request (into [prompt message] results)))))
       response)))
 
@@ -113,13 +113,13 @@
          (aor/node "identify" "model"
                    (fn [node request]
                      (if (valid-request? request)
-                       (aor/emit! node "model" (assoc request :call-id (or (:call-id request) (str (UUID/randomUUID)))))
+                       (aor/emit! node "model" (assoc request :call-id (or (:call-id request) (str (UUID/randomUUID))) :observation-id (str (UUID/randomUUID))))
                        (aor/result! node {:error {:type :bridge.replay/invalid-request}}))))
          (aor/node
           "model" nil
-          (fn [node {:keys [prompt force-retry? tool? timeout? model-name call-id]}]
+          (fn [node {:keys [prompt force-retry? tool? timeout? model-name call-id observation-id]}]
             (try
-              (let [response (model-roundtrip node prompt tool? timeout? model-name call-id)]
+              (let [response (model-roundtrip node prompt tool? timeout? model-name call-id observation-id)]
                 (when (and force-retry?
                            (compare-and-set! (aor/get-agent-object node "retry-latch") false true))
                   (throw (ex-info "Forced post-model Rama retry" {:fixture true})))
