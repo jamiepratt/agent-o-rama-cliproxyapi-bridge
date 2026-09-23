@@ -68,6 +68,20 @@
                            (and (string? (get request k)) (not (str/blank? (get request k))))))
                [:call-id :model-name])))
 
+;; Rama embeds field-position function values as bytecode constants. Construct
+;; these paths in Clojure so worker classloaders resolve functions through Vars.
+(defn complete-call-path [identity completion]
+  [identity (term (partial replay/complete-command completion))])
+
+(defn expired-calls-path [now]
+  [MAP-VALS (pred (partial replay/expired? now)) NONE>])
+
+(defn expired-receipts-path [now]
+  [MAP-VALS (pred (partial admission/command-expired? now)) NONE>])
+
+(defn prune-admission-path [now]
+  [(must admission/state-key) (term (partial admission/prune now))])
+
 (defn proxy-module [{:keys [base-url model timeout-ms bearer-file deadline-ms sweep-ms active-limit queue-limit lock-dir]
                      :or {model "fixture" timeout-ms 30000 deadline-ms 1 sweep-ms 60000 active-limit 10 queue-limit 50
                           lock-dir (str (System/getProperty "user.home") "/.local/share/agent-o-rama-bridge/locks")}}]
@@ -145,11 +159,15 @@
                   (source> *completed-changes :> *completion)
                   (get *completion :identity :> *identity)
                   (<<if (replay/completion-current? *completion)
-                        (local-transform> [*identity (term (partial replay/complete-command *completion))] $$completed-calls))
+                        (complete-call-path *identity *completion :> *complete-path)
+                        (local-transform> *complete-path $$completed-calls))
                   (source> *replay-tick)
                   (|all)
                   (System/currentTimeMillis :> *now)
-                  (local-transform> [MAP-VALS (pred (partial replay/expired? *now)) NONE>] $$completed-calls)
-                  (local-transform> [MAP-VALS (pred (partial admission/command-expired? *now)) NONE>] $$admission-receipts)
-                  (local-transform> [(must admission/state-key) (term (partial admission/prune *now))] $$admission)))
+                  (expired-calls-path *now :> *expired-calls)
+                  (local-transform> *expired-calls $$completed-calls)
+                  (expired-receipts-path *now :> *expired-receipts)
+                  (local-transform> *expired-receipts $$admission-receipts)
+                  (prune-admission-path *now :> *prune-admission)
+                  (local-transform> *prune-admission $$admission)))
      (aor/define-agents! topology))))
