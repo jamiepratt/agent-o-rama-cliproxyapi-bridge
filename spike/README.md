@@ -21,7 +21,7 @@ From the repository root:
 ```sh
 python3 spike/cliproxy.py setup
 python3 spike/cliproxy.py login
-python3 spike/cliproxy.py run --model gpt-5.4 --evidence spike/evidence.json
+python3 spike/cliproxy.py run --model gpt-6-luna --evidence spike/evidence.json
 python3 -m unittest discover -s spike -v
 ```
 
@@ -73,10 +73,12 @@ into responses and verify it never reaches the evidence.
 
 Client disconnect and timeout do not by themselves prove upstream generation
 stopped or that billing stopped. The invalid-schema error's upstream provenance
-also requires assessment of actual results. The script deliberately marks it
-unverified rather than claiming every HTTP error originated upstream. The
-script's successful exit is a protocol smoke-test result, not automatic approval
-of the entire architecture gate.
+is inferred from the upstream schema-error response and the pinned source:
+`internal/translator/codex/openai/chat-completions/codex_openai_request.go`
+forwards the function parameters; `internal/runtime/executor/codex_executor_execute.go`
+returns upstream non-2xx status and body. Raw error text is never saved.
+The script's successful exit is a protocol smoke-test result, not proof of
+production reliability.
 
 ## Observed results, 2026-09-23
 
@@ -89,6 +91,29 @@ Pre-login verification with the pinned binary passed:
 - Three local tests passed: fragmented SSE and evidence filtering, connection
   cleanup on timeout, and rejection of public auth files/multiple accounts.
 
-The human device login and authenticated model probes have not completed.
-No live-stream, tool-call, usage, persistence, timeout, upstream-error, or
-cancellation success is claimed yet. Gate status remains open in issue #7.
+The human completed device login. Live validation using `gpt-6-luna` passed
+twice with a daemon restart between runs; [redacted evidence](evidence.json)
+records both rounds. The original `gpt-5.4` default was not in this account's
+model list, so the probe now defaults to the verified model.
+
+| Check | Both rounds |
+| --- | --- |
+| Bearer protection | 401 without bearer |
+| Model discovery | 200, 13 models |
+| Listener | Only `127.0.0.1:18317` |
+| Stream | 200 SSE, content and `[DONE]` |
+| Stream usage | 307 input, 5 output, 312 total tokens |
+| Tool call | Valid reconstructed `spike_echo` arguments |
+| Tool usage | 338 input, 19 output, 357 total tokens |
+| Auth persistence | Same single private Codex auth file after restart |
+| Client cancellation | Closed after first content, before `[DONE]` |
+| Client timeout | 1 ms socket timeout observed |
+| Unknown model | 400 with error object (proxy routing) |
+| Invalid function schema | 400 with upstream schema-error message |
+| Recovery | Normal stream succeeds after error/cancellation probes |
+
+Decision: direct API compatibility gate passes; proceed to the Agent-o-rama
+integration gate tracked in [issue #2](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/2).
+Cancellation evidence covers local client disconnect and recovery only; upstream
+termination/billing is not observable from this endpoint. OAuth refresh was not
+forced; persistence across restart is verified. No daemon is left running.

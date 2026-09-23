@@ -156,7 +156,8 @@ def stream(payload, cancel=False):
 
 def run(model):
     auth_check()
-    evidence = {'release': VERSION, 'archive_sha256': SHA256, 'model': model, 'runs': []}
+    evidence = {'release': VERSION, 'archive_sha256': SHA256, 'model': model,
+                'recorded_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'runs': []}
     for iteration in range(2):
         # Refuse to attach to an unrelated daemon.
         with socket.socket() as guard:
@@ -207,7 +208,8 @@ def run(model):
                            'parameters': {'type': 'not-a-json-schema-type'}}}]})
             upstream_error = {'status': bad_status, 'has_error_object': isinstance(bad.get('error'), dict),
                               'trigger': 'invalid function JSON schema',
-                              'origin': 'unverified; inspect pinned source before attribution'}
+                              'invalid_schema_message': 'Invalid schema for function' in str(bad.get('error', {}).get('message', '')),
+                              'origin': 'Codex upstream (inferred from pinned executor forwarding and schema-error response)'}
             recovery = stream(base)
             record = {'iteration': iteration + 1, 'unauthenticated_status': 401, 'listeners': addresses,
                       'model_count': len(available), 'auth_files': auth_check(), 'stream': normal,
@@ -228,7 +230,7 @@ def run(model):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['setup', 'login', 'run'])
-    parser.add_argument('--model', default='gpt-5.4')
+    parser.add_argument('--model', default='gpt-6-luna')
     parser.add_argument('--evidence', type=Path)
     args = parser.parse_args()
     if args.action == 'setup':
@@ -241,10 +243,11 @@ def main():
         evidence = run(args.model)
         if args.evidence:
             args.evidence.write_text(json.dumps(evidence, indent=2) + '\n')
-        passed = all(r['stream']['done'] and r['stream']['content_chars'] > 0 and r['stream']['usage']
-                     and r['tool']['done'] and r['tool']['tool_valid'] and r['client_timeout']['observed']
+        passed = all(r['stream']['sse'] and r['stream']['done'] and r['stream']['content_chars'] > 0 and r['stream']['usage']
+                     and r['tool']['sse'] and r['tool']['done'] and r['tool']['tool_valid'] and r['client_timeout']['observed']
                      and r['cancellation'].get('client_closed_before_done') and r['recovery']['done']
                      and r['invalid_tool_schema']['status'] >= 400
+                     and r['invalid_tool_schema']['invalid_schema_message']
                      for r in evidence['runs'])
         if not passed:
             sys.exit('Compatibility checks failed; see redacted evidence.')
