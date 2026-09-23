@@ -306,3 +306,10 @@ Validation record, 2026-09-23:
   exclusion of the provided Rama implementation.
 - No target Linux, production account, remote backup or VPS acceptance test was
   performed by this local validation run. No real provider request was made.
+
+The tested module payload was built from the application and build sources now
+recorded in commit `e69fc67f5cc3c6f368dfb9731da0f4b774730895` (base
+`c2ee8e314cc438dff07b2892c866a95c1deb30ee`). Its local SHA-256 is
+`b1160da0950687f60bd8fb25995b3dc93f6c6def120ac00a0d513bfb24919f8b`.
+The generated JAR is ignored by Git. Record a fresh hash if rebuilding; this build
+does not claim timestamp-independent byte-for-byte reproducibility.
