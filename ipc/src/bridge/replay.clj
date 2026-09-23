@@ -1,6 +1,8 @@
 (ns bridge.replay
-  "Completed model-call replay in durable Rama state. Not in-flight deduplication."
+  "Durable completed replay and shared in-flight model calls."
   (:require [clojure.data.json :as json]
+            [bridge.admission :as admission]
+            [bridge.locks :as locks]
             [clojure.walk :as walk]
             [com.rpl.agent-o-rama :as aor]
             [com.rpl.agent-o-rama.store :as store]
@@ -11,6 +13,7 @@
            [dev.langchain4j.model.openaiofficial OpenAiOfficialTokenUsage]
            [java.security MessageDigest]
            [java.util HexFormat UUID]
+           [java.io Closeable]
            [dev.langchain4j.model.chat StreamingChatModel]
            [dev.langchain4j.model.chat.response ChatResponse StreamingChatResponseHandler]))
 
@@ -90,37 +93,78 @@
 
 (defn replay-model
   "Wrap the pinned official model; completion is durable before delivery to AOR."
-  [^StreamingChatModel upstream configuration]
-  (reify StreamingChatModel
-    (defaultRequestParameters [_] (.defaultRequestParameters upstream))
-    (provider [_] (.provider upstream))
-    (listeners [_] (.listeners upstream))
-    (supportedCapabilities [_] (.supportedCapabilities upstream))
-    (doChat [_ request handler]
-      (let [{:keys [node identity]} *call*
-            state (aor/get-store node "$$completed-calls")
-            digest (fingerprint request configuration)
-            entry (bind-call! state identity digest)
-            generation (:generation entry)]
-        (when (not= digest (:fingerprint entry))
-          (throw (ex-info "Model-call identity conflicts with recorded request" {:type ::identity-conflict})))
-        (if (:result entry)
-          (do (doseq [chunk (:chunks entry)] (.onPartialResponse ^StreamingChatResponseHandler handler ^String chunk))
-              (.onCompleteResponse ^StreamingChatResponseHandler handler (decode-response (:result entry))))
-          (let [chunks (atom [])]
-            (.doChat upstream request
-                     (reify StreamingChatResponseHandler
-                       (^void onPartialResponse [_ ^String chunk]
-                         (swap! chunks conj chunk)
-                         (.onPartialResponse ^StreamingChatResponseHandler handler chunk))
-                       (onCompleteResponse [_ response]
-                         (try
-                           (let [result (encode-response response)
-                                 completed-at (System/currentTimeMillis)
-                                 saved-chunks @chunks]
-                             (store/pstate-transform!
-                              [(must identity) (term #(complete-entry % generation result saved-chunks completed-at))]
-                              state identity)
-                             (.onCompleteResponse ^StreamingChatResponseHandler handler response))
-                           (catch Throwable e (.onError ^StreamingChatResponseHandler handler e))))
-                       (onError [_ error] (.onError ^StreamingChatResponseHandler handler error))))))))))
+  [^StreamingChatModel upstream configuration limits]
+  (let [stopped? (atom false)
+        options (merge limits (locks/prepare-directory! (:lock-dir limits))
+                       {:stopped? stopped? :recovery-at (atom 0)})]
+    (reify
+      Closeable
+      (close [_] (reset! stopped? true))
+      StreamingChatModel
+      (defaultRequestParameters [_] (.defaultRequestParameters upstream))
+      (provider [_] (.provider upstream))
+      (listeners [_] (.listeners upstream))
+      (supportedCapabilities [_] (.supportedCapabilities upstream))
+      (doChat [_ request handler]
+        (let [{:keys [node identity call-id]} *call*
+              _ (admission/check-cancelled! node call-id)
+              state (aor/get-store node "$$completed-calls")
+              digest (fingerprint request configuration)
+              entry (bind-call! state identity digest)
+              generation (:generation entry)]
+          (when (not= digest (:fingerprint entry))
+            (throw (ex-info "Model-call identity conflicts with recorded request" {:type ::identity-conflict})))
+          (if (:result entry)
+            (do (doseq [chunk (:chunks entry)] (.onPartialResponse ^StreamingChatResponseHandler handler ^String chunk))
+                (.onCompleteResponse ^StreamingChatResponseHandler handler (decode-response (:result entry))))
+            (let [call (admission/join! node [identity digest] call-id options)
+                  original-error (atom nil)]
+              (when (:owner? call)
+                (admission/await-turn! call)
+                (try
+                  (if (let [current (admission/entry call)]
+                        (when-not current (throw (ex-info "Admission generation expired" {:type :bridge.admission/generation-expired})))
+                        (or (:cancelled? current) (:terminal? current)))
+                    (admission/finish! call {:terminal? true :cancelled? true})
+                    (if-let [saved-entry (let [latest (store/pstate-select-one [identity] state)] (when (and (:result latest) (= generation (:generation latest)) (= digest (:fingerprint latest))) latest))]
+                      (let [saved (:result saved-entry)]
+                        (doseq [chunk (:chunks saved-entry)] (admission/chunk! call chunk))
+                        (admission/finish! call {:terminal? true :result saved}))
+                      (.doChat upstream request
+                               (reify StreamingChatResponseHandler
+                                 (^void onPartialResponse [_ ^String chunk]
+                                   (try (admission/chunk! call chunk)
+                                        (catch Throwable error (compare-and-set! original-error nil error))))
+                                 (onCompleteResponse [_ response]
+                                   (try
+                                     (when-let [error @original-error] (throw error))
+                                     (let [result (encode-response response)
+                                           completed-at (System/currentTimeMillis)
+                                           current (admission/entry call)
+                                           chunks (:chunks current)]
+                                       (when-not (:cancelled? current)
+                                         (store/pstate-transform!
+                                          [(must identity) (term #(complete-entry % generation result chunks completed-at))]
+                                          state identity))
+                                       (admission/finish! call {:terminal? true :result result}))
+                                     (catch Throwable error
+                                       (reset! original-error error)
+                                       (admission/finish! call {:terminal? true :error (.getName (class error))}))))
+                                 (onError [_ error]
+                                   (reset! original-error error)
+                                   (admission/finish! call {:terminal? true :error (.getName (class error))}))))))
+                  (catch Throwable error
+                    (reset! original-error error)
+                    (admission/finish! call {:terminal? true :error (.getName (class error))}))))
+              (let [outcome (admission/await! call #(.onPartialResponse ^StreamingChatResponseHandler handler ^String %))]
+                (if (:cancelled? outcome)
+                  (.onError ^StreamingChatResponseHandler handler (ex-info "Model call was cancelled" {:type :bridge.admission/cancelled}))
+                  (if-let [error (:error outcome)]
+                    (.onError ^StreamingChatResponseHandler handler
+                              (or @original-error (ex-info "Shared upstream call failed" {:type ::upstream-failure :cause-class error})))
+                    (do
+                      ;; A joined caller may hold a newer binding after expiry.
+                      (store/pstate-transform!
+                       [(must identity) (term #(complete-entry % generation (:result outcome) (:chunks outcome) (System/currentTimeMillis)))]
+                       state identity)
+                      (.onCompleteResponse ^StreamingChatResponseHandler handler (decode-response (:result outcome))))))))))))))

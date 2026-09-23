@@ -1,3 +1,4 @@
 {:lint-as {com.rpl.agent-o-rama/agentmodule clojure.core/fn
            com.rpl.rama/module clojure.core/fn}
- :linters {:unresolved-symbol {:exclude [(com.rpl.rama/declare-tick-depot) (com.rpl.rama/<<sources)]}}}
+ :linters {:unresolved-symbol {:exclude [(com.rpl.rama/declare-tick-depot) (com.rpl.rama/declare-depot) (com.rpl.rama/<<sources)]}}
+ :config-in-call {com.rpl.rama/<<sources {:linters {:invalid-arity {:level :off}}}}}

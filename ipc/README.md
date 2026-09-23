@@ -2,7 +2,7 @@
 
 Tracking: [issue #2](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/2).
 This document records the original experiment. The module now includes
-[durable completed replay](REPLAY.md); this remains an IPC harness, not a deployment.
+[durable replay, coalescing and bounded admission](REPLAY.md); this remains an IPC harness, not a deployment.
 
 ## Pinned runtime
 
@@ -43,7 +43,8 @@ A real `tools/new-tools-agent` executes the pure `spike_echo` fixture; its resul
 is sent back to the model in a second request. The node returns text and usage.
 
 Configuration takes `:base-url`, `:model`, `:timeout-ms`, and optional
-`:bearer-file`. For direct daemon access use `http://127.0.0.1:18317/v1` and the
+`:bearer-file`. Admission adds `:active-limit` (10), `:queue-limit` (50), and a
+private shared single-host `:lock-dir`; see the [admission contract](REPLAY.md). For direct daemon access use `http://127.0.0.1:18317/v1` and the
 absolute path to the dedicated bearer file. Its contents are read only inside
 an agent-object builder after rejecting group/other permissions; resolved bearer
 values are never captured in the serialized module definition. Without a bearer
