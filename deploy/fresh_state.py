@@ -5,6 +5,7 @@ The public CLI always operates on /. The root argument on the library function
 exists for filesystem integration tests; it is deliberately not a CLI option.
 """
 import argparse
+import fcntl
 import hashlib
 import os
 from pathlib import Path
@@ -182,7 +183,14 @@ def main():
     if os.geteuid() != 0 or os.uname().sysname != 'Linux':
         parser.error('Requires root on the installed Linux host')
     os.umask(0o077)
-    checksum = preserve_and_initialize(Path('/'), Path(args.approved_fresh_state))
+    lock_fd = os.open('/run/lock/bridge-maintenance.lock',
+                      os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(lock_fd, 'r+') as lock:
+        lock_info = os.fstat(lock.fileno())
+        if not stat.S_ISREG(lock_info.st_mode) or lock_info.st_uid != 0:
+            raise ValueError('Maintenance lock must be a root-owned regular file')
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        checksum = preserve_and_initialize(Path('/'), Path(args.approved_fresh_state))
     print('Preserved state; fresh roots initialized; services remain inhibited. Archive SHA256: ' + checksum)
 
 

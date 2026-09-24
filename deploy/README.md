@@ -416,7 +416,8 @@ sudo python3 deploy/fresh_state.py --approved-fresh-state /var/lib/bridge-preser
 
 The destination must not exist, must share the Rama/ZooKeeper filesystem, and
 must have an existing root-owned parent without group/world write permission.
-The CLI has no alternate filesystem-root option. Before moving any state it
+The CLI has no alternate filesystem-root option and holds an exclusive,
+nonblocking `/run/lock/bridge-maintenance.lock` during preservation. Before moving any state it
 checks service inhibitors and absence of service-account processes, available space,
 required sources, and path safety. It writes a private `state.tar`, compares
 archived file bytes and symlink targets with the stopped sources, and records
