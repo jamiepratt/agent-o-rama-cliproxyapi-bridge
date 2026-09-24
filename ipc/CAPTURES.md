@@ -186,8 +186,9 @@ is outside this experiment and does not block the prospective investigation.
 
 ## Fresh native cluster restart
 
-A new local macOS cluster used the pinned Rama distribution and ZooKeeper 3.9.6,
-fresh temporary state, a loopback fake SSE upstream and a fixture module entrypoint
+A new local macOS cluster used one supervisor, worker and task, the pinned Rama
+distribution and ZooKeeper 3.9.6, fresh temporary state, a loopback fake SSE
+upstream and a fixture module entrypoint
 calling the actual `bridge.module/proxy-module`. The fixture deployment JAR had
 SHA-256 `a590fd2e6910eca3d152f35944f9c34776ed855f54d9a6346df0e537960d89ee`.
 Its only additional ZIP entry was `bridge/cold_fixture.clj`; every original
@@ -200,6 +201,9 @@ The harness then requested normal Rama cluster shutdown and observed
 and fake upstream were stopped. Process inspection found no owned JVMs and all
 test listeners were closed before restarting the same retained state.
 
+Warm/cold ZooKeeper logs record Java 21.0.7; Rama and clients resolved the same
+Java installation. Individual Rama/client version strings were not recorded.
+
 After restart, completed replay returned identical chunks, text and usage with
 the upstream request count still one. A new identity streamed successfully and
 increased that count to two. Completed/admission PStates and fourteen receipts
@@ -210,3 +214,5 @@ normal orderly restart. All experimental processes were stopped afterward.
 artifact; overall NO-GO for #21's broader loading-history requirement.** This
 does not establish arbitrary namespace-order safety, legacy-state recovery,
 cross-version compatibility, Linux/systemd behavior or production deployment.
+Orderly snapshots need not deserialize every historical closure; this was not a
+crash-recovery test.
