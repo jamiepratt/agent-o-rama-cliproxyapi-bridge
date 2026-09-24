@@ -1,12 +1,15 @@
-# Private single-host deployment preparation
+# Private single-host deployment
 
 [Issue #5 remains open](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/5).
-These are reviewable installation artifacts, not an accepted production deployment.
-Initial preparation and validation ran on macOS. The Ubuntu 24.04 VPS has since
-passed firewall syntax, installed systemd unit validation, and the no-provider
-deployed-module readiness check described below. The full deployment acceptance,
-including memory/update, reboot and recovery evidence, remains tracked in #5;
-[the complete acceptance story is #8](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/8).
+The validated build is deployed privately on the existing Ubuntu 24.04 VPS with
+fresh application state and complete old state preserved. Real provider
+stream/replay, reboot recovery, bounded fixture load, encrypted off-host backup
+and an isolated working restore passed on 2026-09-24. See
+[deployment evidence](DEPLOYMENT-2026-09-24.md) for exact artifact, scope and limits.
+This is a verified deployment slice, not full acceptance: cross-artifact/runtime
+upgrade and rollback plus actual OAuth reauthentication remain unperformed under
+[#5](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/5).
+[End-to-end acceptance is tracked in #8](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/8).
 
 ## Payload and trust
 
@@ -16,8 +19,9 @@ pinned digests in `artifacts.json`. It does not unpack or run anything. Rama
 integrity pin, not an independently signed publisher checksum. CLIProxyAPI
 7.3.15 Linux amd64 and ZooKeeper 3.9.6 match publisher checksum files.
 ZooKeeper 3.9.6 fixes security issues affecting earlier 3.9.x releases; this
-changes the server only, not Rama's embedded client libraries. Actual
-server/client integration remains a Linux acceptance gate.
+changes the server only, not Rama's embedded client libraries. The pinned
+server/client combination subsequently passed the Linux deployment
+and restart checks recorded in [deployment evidence](DEPLOYMENT-2026-09-24.md).
 
 `mvn -f deploy/pom.xml package` builds the bounded-AOT Clojure module uberjar at
 `deploy/target/bridge-jar-with-dependencies.jar`. Rama is `provided`, never bundled.
@@ -89,7 +93,8 @@ Python 3, supported Java 21, `nft`, `restic`, `tailscale`, `unzip`, `tar`, `floc
 `openssl` and ordinary account utilities already installed. Ubuntu 24.04 supplies
 Java 21; Debian 12 needs a separately approved Java 21 source. Patch OS tools from
 supported repositories and record exact installed versions. These host package
-versions have not been tested or frozen here. No script installs OS packages. On the approved Ubuntu 24.04 host, the OS
+versions were not frozen by these preparation scripts; the deployed versions
+and target evidence are recorded separately. No script installs OS packages. On the approved Ubuntu 24.04 host, the OS
 prerequisites can be installed with `sudo apt-get update` followed by
 `sudo apt-get install openjdk-21-jre-headless python3 nftables restic unzip
 openssl ca-certificates procps util-linux`. Install Tailscale separately using
@@ -188,6 +193,30 @@ one small completion. Run the existing live acceptance harness against the targe
 through an approved invocation client before declaring streaming/reboot healthy;
 the local IPC harness alone cannot establish production acceptance.
 
+### Streaming and replay probe
+
+[`probe.clj`](probe.clj) checks the actual deployed module. Copy the reviewed file
+to a `bridge-rama`-owned 0700 directory such as
+`/var/lib/bridge-rama/probe-b03`; keep records private. From a root operator shell:
+
+```sh
+runuser -u bridge-rama -- timeout 300s java -Xss6m -Xmx768m \
+  -Dlog4j.configurationFile=/etc/bridge/log4j2.properties \
+  -cp '/opt/bridge/current/rama/rama.jar:/opt/bridge/current/rama/lib/*:/opt/bridge/module.jar' \
+  clojure.main /var/lib/bridge-rama/probe-b03/probe.clj \
+  warm /var/lib/bridge-rama/probe-b03/record.edn UNIQUE_CALL_ID
+```
+
+Use a new absolute record path and call ID for `warm`; it creates a 0600 record,
+requires one upstream dispatch, then checks exact streamed text/chunks/usage
+replay without another dispatch. Within the one-hour replay TTL, repeat with
+`replay` and the same record/call ID to verify saved replay only. Use `cold` after
+restart to verify the saved replay and one new call. `warm` and `cold` generate
+provider traffic when used against the live proxy. A nonzero exit fails the
+probe; private record contents must not be copied into public evidence.
+See [the restore runbook](RESTORE.md) for using the same probe with an isolated
+restored cluster and loopback fixture.
+
 ## Memory and service failure
 
 Configured maximum Java heaps: Conductor 512MiB, Supervisor 256MiB, worker 2048MiB,
@@ -220,12 +249,19 @@ Free Rama requires an application-consistent maintenance window:
 
 ```sh
 sudo /opt/bridge/admin.sh --approved-maintenance shutdown
-# Human verifies Rama Conductor UI state exactly [:cluster-shutdown-complete].
+# Verify Conductor state exactly ["cluster-shutdown-complete"] using the UI or JSON endpoint.
 sudo /opt/bridge/admin.sh --approved-maintenance backup --confirmed-cluster-shutdown
 ```
 
-Stop new clients before shutdown. The confirmation is a required human observation,
-not a machine-verified state in this script. Backup then stops UI/proxy/all Rama
+Stop new clients before shutdown. An authorized operator or agent must verify the
+Conductor state before passing the confirmation flag; `admin.sh` does not verify
+it automatically. The documented JSON endpoint is `GET /d/conductor/` with
+`Accept: application/json`, on the private Conductor UI at port 1974. Its shutdown
+state must be exactly `["cluster-shutdown-complete"]`. For example, inspect the
+response using `curl --fail --silent --show-error -H 'Accept: application/json'
+http://127.0.0.1:1974/d/conductor/` from the host. Existing explicit maintenance
+authorization covers this observation and shutdown/backup operation; it does not
+require a new human approval. Backup then stops UI/proxy/all Rama
 services and ZooKeeper, verifies no process remains for any service user, and
 backs up ZooKeeper snapshots **and transaction logs**, complete Rama state,
 permanent lock directory, OAuth state, configuration, systemd units and pinned runtime/jars using
@@ -241,8 +277,11 @@ sudo /opt/bridge/admin.sh --approved-maintenance restore-drill SNAPSHOT_ID /var/
 ```
 
 This restores and verifies into a new 0700 directory and starts nothing. It is only
-an extraction check. Full recovery must be tested on an isolated host with no
-route to the live cluster and no provider access until explicitly approved:
+an extraction check. For a working same-host restore in isolated Linux network,
+mount and PID namespaces, use [the restore harness](RESTORE.md). The 2026-09-24
+working drill and its isolation evidence are recorded in
+[deployment evidence](DEPLOYMENT-2026-09-24.md). For recovery on a separate host with
+no route to the live cluster and no provider access until explicitly approved:
 install the same runtime/OS prerequisites; create the three accounts with the
 original numeric UID/GID recorded in `/etc/bridge/accounts.json`; keep all bridge units stopped; restore exact
 `/var/lib/bridge-*`, `/etc/bridge` and `/opt/bridge` paths from that verified
@@ -281,7 +320,8 @@ and release directories. This installer refuses to overwrite a host; it is not a
 runtime upgrade engine. Follow Rama's documented atomic-version procedure and
 same-version restore rule, preserve the previous whole release and full snapshot,
 and do not point `current` at a new major/minor runtime while old workers run.
-That production upgrade/rollback drill remains unperformed under #5.
+Cross-artifact and runtime upgrade/rollback remain unperformed under #5.
+A same-artifact update alone does not establish cross-build state compatibility.
 
 ## Sources and local verification
 
@@ -294,13 +334,13 @@ Official sources checked 2026-09-23:
 [CLIProxyAPI7.3.15](https://github.com/router-for-me/CLIProxyAPI/releases/tag/v7.3.15),
 [AOR0.10.0 source](https://github.com/redplanetlabs/agent-o-rama/tree/2d94b569333abc081c9bf8c7aa835dd0c4f38182).
 
-Local checks: approval refusal before host commands; corrupt checksum rejection;
-strict private runtime configuration; shell syntax; Maven packaging; module
-construction using actual Rama 1.9.0 distribution plus packaged JAR. Target nft
-syntax/kernel rules, systemd sandbox/process behavior, Linux amd64 binary startup,
-real ZooKeeper/Rama cluster interoperability, remote encrypted backup/restore,
-reboot, OAuth and normal/update memory remain unperformed. macOS has no running
-Linux VM or systemd tooling; no VM was installed to imply these passed.
+Initial local preparation checks covered approval refusal before host commands,
+corrupt checksum rejection, private runtime configuration, shell syntax, Maven
+packaging and module construction against the Rama distribution. Those macOS
+checks did not establish Linux or production behavior. Subsequent target checks
+are recorded in [2026-09-24 deployment evidence](DEPLOYMENT-2026-09-24.md), including
+Linux service behavior, reboot, load and isolated recovery. OAuth reauthentication
+and cross-artifact/runtime upgrade/rollback are still unperformed.
 
 Reproduce local checks from the repository root:
 
