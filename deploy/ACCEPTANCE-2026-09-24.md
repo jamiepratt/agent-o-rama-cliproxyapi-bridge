@@ -28,6 +28,12 @@ authentication, malformed responses, deadlines and expiry. Labels are bounded.
 Readiness probes consume separate provider traffic and do not increment adapter
 dispatch counters. Prior complete packaged validation was 46 tests / 628
 assertions on the unchanged artifact; it is historical evidence, not a new run.
+Fresh composed validation passed **14 tests / 374 assertions**, zero failures or
+errors, using that exact packaged artifact. The runner adds final provider-count
+assertions after each case, including completed duplicates. The five IPC/spike
+Python regressions passed; deployment regressions passed 31 tests with three
+expected host-only skips. The new Clojure harness passed repair then lint before
+its targeted run. No product source or production artifact was rebuilt.
 
 ## Fresh production and security checks
 
@@ -38,7 +44,11 @@ the deployed public Agent-o-rama API returned one ordered chunk, usage
 307/5/312, one new adapter dispatch and zero replay dispatches. Replay matched
 text, chunks and usage exactly. Explicit readiness refresh reported
 available/configured/verified true, reason `ok`. Active and queued gauges drained
-to zero. The private probe record is retained on the host; no response content
+to zero. A later read, more than five minutes after refresh, correctly reported
+`verified: false`, reason `expired`, while the six units remained active and
+active/queued gauges stayed zero. Cached verification expiry is the documented
+TTL behavior, not a newly observed provider failure. The private probe record
+is retained on the host; no response content
 is included here.
 
 Fresh external TCP connection probes tested all observed listener ports plus
