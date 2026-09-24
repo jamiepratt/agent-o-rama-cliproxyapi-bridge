@@ -4,6 +4,7 @@
             [bridge.admission :as admission]
             [bridge.locks :as locks]
             [bridge.metrics :as metrics]
+            [bridge.store-path :as store-path]
             [clojure.walk :as walk]
             [com.rpl.agent-o-rama :as aor]
             [com.rpl.rama :as rama]
@@ -99,8 +100,8 @@
   (loop []
     (let [now (System/currentTimeMillis)
           candidate (str (UUID/randomUUID))]
-      (store/pstate-transform! [identity (term (reservation-transform {:now now :digest digest :candidate candidate}))] state identity)
-      (let [entry (store/pstate-select-one [identity] state)]
+      (store-path/transform! [identity (term (reservation-transform {:now now :digest digest :candidate candidate}))] state identity)
+      (let [entry (store-path/select-one [identity] state)]
         (if (or (nil? entry) (expired? (System/currentTimeMillis) entry))
           (recur)
           entry)))))

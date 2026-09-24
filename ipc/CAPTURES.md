@@ -216,3 +216,81 @@ does not establish arbitrary namespace-order safety, legacy-state recovery,
 cross-version compatibility, Linux/systemd behavior or production deployment.
 Orderly snapshots need not deserialize every historical closure; this was not a
 crash-recovery test.
+
+## Prospective AOT artifact, issue #22
+
+The next experiment pins application bytecode instead of compiling persisted
+functions again in each process. `deploy/compile.clj` compiles `bridge.locks`,
+`metrics`, `admission`, `replay`, `module`, `observability`, `runtime` and `commands`
+after loading dependencies without compilation. The package contains 191
+application classes and eight namespace loaders. Compiled application sources
+are removed so resource timestamps cannot select runtime recompilation. Build
+checks reject dependency class emission and preserve the two source-only
+namespaces. The isolated SDK contributes another 1,263 `bridge.isolated` classes.
+
+`bridge.deployed` reads host configuration and stays source-loaded. A second,
+small source-only namespace, `bridge.store-path`, forwards the public AOR
+`pstate-transform!` and `pstate-select-one` macros. This boundary is necessary:
+application-only AOT initially fixed direct closure thaw but made `bind-call!`
+fail with `NoClassDefFoundError` for AOR's runtime-generated
+`com.rpl.agent_o_rama.impl.store_impl.PStateStoreInternal` interface. `jdeps`
+confirmed the direct interface reference in the compiled replay method. Moving
+only the public macro calls into the source-loaded boundary removed that static
+linkage without depending on private AOR APIs or compiling AOR itself. The helper
+creates no persisted closure and preserves macro arguments and return values.
+
+The persisted-value inventory is:
+
+| Path | Persisted values and class source |
+| --- | --- |
+| Admission depot | Plain command envelope, thirteen single-map transform producers; transform classes from the application JAR |
+| Reservation PState write | `CombineTwoNavs`, `keypath_STAR_RichNav`, `term_STAR_RichNav`, `TermObjWrapper` from the pinned Rama JAR; single-map reservation class from the application JAR |
+| Completed-call depot | Plain completion command; topology constructs `complete-call-path` using `partial replay/complete-command` |
+| Tick cleanup | Topology constructs expired-call, expired-receipt and admission-prune paths from timestamp data; these are not additional `change!` producers |
+| Module/agent definitions | Application factory/reify and agent callback classes are included in the AOT application classes; Rama retains responsibility for generated topology bytecode |
+
+The full reservation path probe inventories nested classes and prints their JAR
+resource origins. It contains no generated `bridge.store-path` function and no
+writer-derived class lookup. The strengthened corpus compares exact writer
+results for missing, unexpired and expired bindings, including generated UUID
+and captured expiry, then checks idempotence and unrelated keys. Admission
+inputs seed the actual captured candidate and two queued entries so rejection
+cleanup and queue preservation are meaningful.
+
+The source-packaged artifact's three changed-order failures were reproduced
+before implementation in fresh JVMs: admission and reservation class lookup
+failed, and complete-path thaw failed at `CombineTwoNavs.nav2`. Application-only
+AOT then exposed the separate protocol-interface linkage failure above. These
+are separate RED results, not a claim that the original full path's hidden error
+was conclusively diagnosed.
+
+The tested bounded-AOT artifact SHA-256 is
+`f3145e3596733590b3487dcd4348f94311f821743b2734fb5801ce2dda10289c`.
+Versions remain Rama 1.9.0, Agent-o-rama 0.10.0, Clojure 1.12.4 and Java 21.0.7.
+Use `deploy/check_captures.py` for serial writers and readers, logs and hash
+recording. It never preloads writer-specific class names. Both namespace-order
+writer variants are supported; each is read by separate baseline/perturb-1000
+and module-first/perturb-10000 processes. The metrics variant runs the packaged
+IPC suite and records all five emitted producer classes.
+
+This artifact is a prospective same-artifact persistence experiment. Rebuilding
+can produce different anonymous class suffixes or JAR timestamps. Nothing here
+establishes cross-artifact upgrades, legacy decoding or production recovery;
+production state and snapshots were not touched.
+
+The direct/path matrix passed all 18 fresh-process runs on this artifact:
+
+| Writer | Reader | Admission (8) | Reservation | Complete path |
+| --- | --- | --- | --- | --- |
+| Baseline, perturb 0 | Baseline, perturb 1000 | PASS | PASS | PASS |
+| Baseline, perturb 0 | Module first, perturb 10000 | PASS | PASS | PASS |
+| Module first, perturb 0 | Baseline, perturb 1000 | PASS | PASS | PASS |
+| Module first, perturb 0 | Module first, perturb 10000 | PASS | PASS | PASS |
+
+The packaged structural/semantic capture suite passed 6 tests / 42 assertions.
+Repair and lint passed for every changed Clojure file. Final compiler validation
+was also executed against an isolated copy of the emitted classes with source
+resources restored: all 191 application classes remained, eight compiled sources
+were removed after loader checks, and both intentional source-only namespaces
+retained their source without loaders. These direct/path results do not alone
+establish full cluster or metrics acceptance.

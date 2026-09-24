@@ -19,13 +19,38 @@ ZooKeeper 3.9.6 fixes security issues affecting earlier 3.9.x releases; this
 changes the server only, not Rama's embedded client libraries. Actual
 server/client integration remains a Linux acceptance gate.
 
-`mvn -f deploy/pom.xml package` builds the non-AOT Clojure module uberjar at
+`mvn -f deploy/pom.xml package` builds the bounded-AOT Clojure module uberjar at
 `deploy/target/bridge-jar-with-dependencies.jar`. Rama is `provided`, never bundled.
 AOR 0.10.0, Clojure 1.12.4 and the official LC4j OpenAI provider
 1.18.1-beta28 match the tested IPC dependencies. Build on a trusted machine;
 record the source commit, JAR SHA-256, Maven dependency tree and target OS package
 versions with private operator evidence. Dependencies are version-pinned; Maven
 transitive artifacts are not claimed to have an independent signed lockfile.
+
+`compile.clj` preloads dependencies without AOT, then compiles eight application
+namespaces in a fixed order. It rejects dependency bytecode and removes each
+compiled namespace's source only after verifying its `__init.class`. This keeps
+runtime source timestamps from selecting newly generated persistence classes.
+`bridge.deployed` remains source-loaded because it reads deployment configuration;
+`bridge.store-path` remains source-loaded because AOR's public store macros call
+protocol interfaces generated at runtime. That small boundary forwards paths
+and results without creating persisted closures. Neither dependency source nor
+Rama's distributed libraries are recompiled. See [capture evidence](../ipc/CAPTURES.md).
+
+Run the serial, fresh-JVM persistence matrix against the actual distribution:
+
+```sh
+python3 deploy/check_captures.py "$RAMA_DIST" deploy/target/bridge-jar-with-dependencies.jar /tmp/capture-matrix
+python3 deploy/check_captures.py "$RAMA_DIST" deploy/target/bridge-jar-with-dependencies.jar /tmp/capture-reverse --writer-module-first
+```
+
+Each output directory must be new. The default includes the full IPC suite as
+metrics writer, all five metrics closures, eight admission producers, direct
+reservation and the complete replay path. `--kinds` can select a narrow probe.
+Readers vary allocation and namespace order without looking up writer class
+names. Evidence is specific to the exact JAR hash; AOT does not promise compatible
+class names across rebuilt artifacts, source changes or dependency upgrades.
+
 
 The actual Rama distribution puts `jackson-datatype-jdk8` 2.10.2 ahead of module
 jars (its Jackson core/databind are 2.18.2). An

@@ -3,18 +3,30 @@
   (System/identityHashCode (Object.)))
 (when (= "1" (System/getenv "BRIDGE_LOAD_MODULE_FIRST")) (require 'bridge.module))
 (when (= "metrics" (second *command-line-args*)) (require 'bridge.ipc-test))
-(require '[bridge.capture-test :as captures]
+(require '[clojure.java.io :as io]
+         '[bridge.capture-test :as captures]
          '[bridge.replay :as replay]
          '[com.rpl.agent-o-rama.impl.store-impl :as store]
          '[com.rpl.ramaspecter :as path]
          '[taoensso.nippy :as nippy]
          '[com.rpl.nippy-serializable-fn])
 
+(when (= "1" (System/getenv "BRIDGE_REQUIRE_AOT"))
+  (doseq [sym '[bridge.admission bridge.replay bridge.module]]
+    (let [resource (str (.replace (str sym) \. \/) "__init.class")
+          origin (io/resource resource)]
+      (assert (and origin (= "jar" (.getProtocol origin))) (str "Missing AOT class " resource))
+      (println :aot-origin resource (str origin)))))
+
 (defn layout [f]
-  {:class (.getName (class f))
-   :fields (mapv (fn [field] [(.getName field) (.getName (.getType field))])
-                 (remove #(java.lang.reflect.Modifier/isStatic (.getModifiers %))
-                         (.getDeclaredFields (class f))))})
+  (let [name (.getName (class f))
+        origin (.getResource (class f) (str "/" (.replace name \. \/) ".class"))]
+    (when (and (= "1" (System/getenv "BRIDGE_REQUIRE_AOT")) (.startsWith name "bridge."))
+      (assert (and origin (= "jar" (.getProtocol origin))) (str "Unpackaged closure " name)))
+    {:class name :origin (some-> origin str)
+     :fields (mapv (fn [field] [(.getName field) (.getName (.getType field))])
+                   (remove #(java.lang.reflect.Modifier/isStatic (.getModifiers %))
+                           (.getDeclaredFields (class f))))}))
 
 (defn path-layouts [value depth]
   (when (and (pos? depth)
@@ -22,15 +34,17 @@
     (cons (layout value)
           (mapcat #(path-layouts % (dec depth)) (remove nil? (captures/captured-values value))))))
 
-(defn inputs []
-  (let [initial {:entries {"generation-A" {:chunks [] :identity ["identity-I" "digest-J"]
+(defn inputs [f]
+  (let [candidate (or (:candidate (first (captures/captured-values f))) "waiter-C")
+        initial {:entries {"generation-A" {:chunks [] :identity ["identity-I" "digest-J"]
                                            :call-id "call-D" :phase :active}
+                           "queued-second" {:chunks [] :identity ["second"] :call-id "second-call" :phase :queued}
                            "chunk-B" {:chunks ["untouched"] :identity ["unrelated"]
                                       :call-id "other-call" :phase :queued}}
-                 :identities {["identity-I" "digest-J"] "generation-A" ["unrelated"] "chunk-B"}
-                 :active #{"generation-A"} :queue ["chunk-B"]
-                 :waiters {"waiter-C" "generation-A" "other" "generation-A"}
-                 :waiter-expires {"waiter-C" 200 "other" 200}}]
+                 :identities {["identity-I" "digest-J"] "generation-A" ["unrelated"] "chunk-B" ["second"] "queued-second"}
+                 :active #{"generation-A"} :queue ["chunk-B" "queued-second"]
+                 :waiters {candidate "generation-A" "other" "generation-A"}
+                 :waiter-expires {candidate 200 "other" 200}}]
     [initial (assoc-in initial [:entries "generation-A" :terminal?] true)
      (assoc-in initial [:entries "generation-A" :cancelled?] true)
      (update initial :entries dissoc "generation-A")]))
@@ -44,9 +58,9 @@
         (assert (= 1 (count (captures/captured-values f)))))
       (if (= mode "write")
         (nippy/freeze-to-file file {:transforms transforms
-                                    :expected (mapv #(mapv % (inputs)) transforms)})
+                                    :expected (mapv #(mapv % (inputs %)) transforms)})
         (let [{:keys [transforms expected]} (nippy/thaw-from-file file)]
-          (assert (= expected (mapv #(mapv % (inputs)) transforms)))
+          (assert (= expected (mapv #(mapv % (inputs %)) transforms)))
           (println :admission-semantics-pass))))
     "reservation"
     (let [f (replay/reservation-transform {:now 100 :digest "digest-J" :candidate "candidate-K"})
@@ -92,10 +106,18 @@
        (reify store/PStateStoreInternal
          (pstate-transform* [_ _ p]
            (println :writer-path (vec (path-layouts p 8)))
-           (nippy/freeze-to-file file p))
+           (let [initial {"unrelated" {:fingerprint "untouched"}}
+                 cases [initial
+                        (assoc initial "identity-I" {:fingerprint "valid-F" :generation "valid-G"
+                                                     :expires-at Long/MAX_VALUE})
+                        (assoc initial "identity-I" {:fingerprint "expired-F" :generation "expired-G"
+                                                     :expires-at 0})]]
+             (nippy/freeze-to-file file {:path p :cases cases
+                                         :expected (mapv #(path/multi-transform p %) cases)})))
          (pstate-select-one* [_ _] {:expires-at Long/MAX_VALUE}))
        "identity-I" "digest-J")
-      (let [p (nippy/thaw-from-file file)
+      (let [{p :path :keys [cases expected]} (nippy/thaw-from-file file)
+            _ (assert (= expected (mapv #(path/multi-transform p %) cases)))
             initial {"unrelated" {:fingerprint "untouched"}}
             result (path/multi-transform p initial)]
         (assert (= "digest-J" (get-in result ["identity-I" :fingerprint])))
