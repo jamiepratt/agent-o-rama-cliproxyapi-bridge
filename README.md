@@ -10,3 +10,5 @@ See [the Agent-o-rama IPC spike](ipc/README.md) for Clojure integration checks.
 See [private provider readiness and Prometheus metrics](ipc/OBSERVABILITY.md).
 
 See [private deployment preparation and operator gates](deploy/README.md).
+
+See [final acceptance evidence and cost boundaries](deploy/ACCEPTANCE-2026-09-24.md).
