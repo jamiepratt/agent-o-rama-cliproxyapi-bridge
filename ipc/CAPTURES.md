@@ -5,6 +5,12 @@ tests prospective function persistence on Rama 1.9.0, Agent-o-rama 0.10.0 and
 Clojure 1.12.4. The function-based `change!` API and receipt topology remain intact.
 This experiment does not recover old state or establish cross-version compatibility.
 
+**Latest result: GO for the bounded-AOT artifact recorded below.** Both tested
+writer namespace orders, perturbed fresh readers, all producer semantics and a
+real isolated orderly cluster restart pass. Earlier source-packaged NO-GO
+results remain below as historical evidence. This does not authorize production
+deployment or establish compatibility between rebuilt artifacts.
+
 ## Submitted closure inventory
 
 Each submitted function closes over one `params` map and destructures it inside
@@ -294,3 +300,61 @@ resources restored: all 191 application classes remained, eight compiled sources
 were removed after loader checks, and both intentional source-only namespaces
 retained their source without loaders. These direct/path results do not alone
 establish full cluster or metrics acceptance.
+
+## Final AOT regression validation
+
+Both metrics writers, baseline and module-first, passed the complete packaged
+suite: **46 tests / 628 assertions each, zero failures/errors**. Each writer's
+five actual emitted metrics functions passed fresh baseline/perturb-1000 and
+module-first/perturb-10000 readers. Together with admission, reservation and
+complete-path probes, all 24 writer/reader processes passed on the unchanged
+`f3145e3596733590b3487dcd4348f94311f821743b2734fb5801ce2dda10289c` artifact.
+Every submitted producer retained one plain-data map field. Metrics readers
+checked counters, captured duration, observation expiry/retry semantics and
+unrelated entries, and printed application-JAR class origins.
+
+The standalone command suite passed **3 tests / 21 assertions**. Seven Python
+regressions and shell syntax passed; three Linux/deployed-host checks were
+skipped. JVM suites ran serially; packaged suites used the actual Rama
+distribution before the application JAR and test sources. An independent read-only review verified
+the artifact layout, helper boundary, cold-process manifests and test totals.
+Implementation is recorded in commit `2435f4181f5a45b63fcc9037d97ba6719fd4f784`.
+
+## Final AOT fresh-cluster restart and decision
+
+A new isolated native macOS cluster used Rama 1.9.0, AOR 0.10.0, Clojure 1.12.4,
+ZooKeeper 3.9.6, one supervisor/worker/task and a loopback fake SSE upstream.
+The fixture overlay SHA-256 was
+`541086b00b5b3db54618041cfb63aae3def33c0449bd273bdcae446db3444ce9`.
+All 37,442 original application-JAR entries were byte-identical; the only added
+entry was `bridge/cold_fixture.clj`, calling the actual module factory.
+
+Warm streaming returned `one two`, ordered chunks `["one" " two"]`, usage
+3/2/5 and one upstream request. Completed/admission PStates and eight receipts
+were readable. Normal shutdown reached `cluster-shutdown-complete`; all owned
+processes and test listeners were absent before restarting the retained state.
+Cold completed replay preserved the result with the request count still one.
+A new identity streamed successfully and increased it to two. Durable state and
+eleven receipts were readable after replay. Final orderly shutdown completed;
+all fifteen recorded PIDs were absent and all test listeners were closed.
+
+Warm/cold ZooKeeper, conductor, supervisor and worker JVM versions were directly
+verified as Java 21.0.7. The cold client printed that version; the warm client
+used the same verified executable without a separate per-process observation.
+The worker used its distribution default 4 GiB heap; no resource-sizing result
+is claimed. Harness corrections created a missing empty log directory before
+deployment and retried a cold client after a readiness race, before dispatch.
+Neither changed the application artifact, persisted state or reader classes.
+
+**GO for #21 and #22's prospective, same-artifact acceptance on these versions.**
+All thirteen submitted map captures, independent reservation and complete-path
+semantics, varied fresh-JVM loading histories, packaged regressions and the real
+fresh-state process restart pass. The original synthetic field-order failure
+and the source artifact's class-loading failures remain preserved above.
+
+This is an orderly restart, not crash recovery; snapshots need not deserialize
+every historical closure. The separate cold corpus tests exercise those closure
+and path classes directly. These results do not prove arbitrary loading
+histories, rebuilt-artifact upgrades, Linux/systemd behavior, legacy decoding,
+production recovery or production acceptance under #5/#8. No production state,
+credentials, backups or snapshots were altered.

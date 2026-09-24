@@ -2,11 +2,11 @@
 
 Implemented for [issue #6](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/6) and [issue #3](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/3), on the pinned runtime in [README.md](README.md).
 
-The current source-packaged artifact has unresolved cold-JVM closure-class
-availability failures. The [single-map experiment](CAPTURES.md) preserves
-operation semantics under matching class availability but is **NO-GO for the
-complete persistence acceptance gate**. Prospective class stability is tracked
-in [issue #22](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/22).
+The bounded-AOT artifact passes the [single-map persistence experiment](CAPTURES.md):
+fresh writer/readers with varied loading histories and an isolated orderly Rama
+process restart preserve the tested semantics. This is **GO for the exact tested
+artifact and pinned versions** under [issue #22](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/22),
+not evidence of cross-artifact upgrades or legacy-state recovery.
 
 `bridge.module/proxy-module` now wraps the official streaming model with
 `bridge.replay/replay-model`, inside Agent-o-rama's model instrumentation.
