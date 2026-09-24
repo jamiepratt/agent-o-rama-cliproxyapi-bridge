@@ -2,6 +2,7 @@
 """Compare copied OAuth bootstrap across old/new/old in a loopback-only netns."""
 import argparse
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -9,16 +10,36 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
 import urllib.request
 
 
-def require_isolation(interfaces=None):
+def require_isolation(interfaces=None, platform=None, routes=None):
+    if (sys.platform if platform is None else platform) != 'linux':
+        raise ValueError('Requires Linux network isolation')
     names = {name for _, name in (socket.if_nameindex() if interfaces is None else interfaces)}
     if names != {'lo'}:
         raise ValueError('Requires an isolated loopback-only network namespace')
+    if routes is None:
+        routes = []
+        for family in ['-4', '-6']:
+            routes.extend(json.loads(subprocess.check_output(
+                ['ip', '-j', family, 'route', 'show', 'table', 'all'],
+                stderr=subprocess.DEVNULL, timeout=5)))
+    for route in routes:
+        if route.get('type') in {'unreachable', 'prohibit', 'blackhole', 'throw'}:
+            continue
+        destination = route.get('dst', 'default')
+        try:
+            network = ipaddress.ip_network(destination, strict=False)
+        except ValueError:
+            raise ValueError('Non-loopback route present') from None
+        loopback = ipaddress.ip_network('127.0.0.0/8' if network.version == 4 else '::1/128')
+        if route.get('dev') != 'lo' or 'gateway' in route or not network.subnet_of(loopback):
+            raise ValueError('Non-loopback route present')
 
 
 def manifest(root):
@@ -69,10 +90,19 @@ def isolated_config(text, auth_dir, port):
     return text, keys[0]
 
 
+class EmptyInventory(ValueError):
+    """A valid response before the asynchronous credential registry is ready."""
+
+
 def inventory(response):
+    if not isinstance(response, dict) or not isinstance(response.get('data'), list):
+        raise ValueError('Invalid model inventory')
+    if not response['data']:
+        raise EmptyInventory('Model registry not ready')
+    if any(not isinstance(item, dict) or not isinstance(item.get('id'), str)
+           or not item['id'] for item in response['data']):
+        raise ValueError('Invalid model inventory')
     names = sorted(item['id'] for item in response['data'])
-    if not names or any(not isinstance(name, str) for name in names):
-        raise ValueError('Empty or invalid model inventory')
     return len(names), hashlib.sha256(json.dumps(names, separators=(',', ':')).encode()).hexdigest()
 
 
@@ -98,7 +128,7 @@ def boot(binary, config, key, cwd, port):
             try:
                 with opener.open(request, timeout=2) as response:
                     return inventory(json.load(response))
-            except (urllib.error.URLError, TimeoutError):
+            except (urllib.error.URLError, TimeoutError, EmptyInventory):
                 time.sleep(0.1)
         raise ValueError('Proxy bootstrap timed out')
     finally:
