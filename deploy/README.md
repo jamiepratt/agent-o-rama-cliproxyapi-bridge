@@ -382,3 +382,65 @@ Issue #14 follow-up validation, 2026-09-23, test commit
 - Fresh Rama archive matched the pinned SHA-256. Fresh module JAR SHA-256:
   `af94b94d59dbd03ec0ff774d684a06f2f87c02418ceda99b0717f8beebd99f91`.
 - No provider calls, deployment, server or Tailscale changes were made.
+
+## Fresh state after stopped-state preservation
+
+`fresh_state.py` is an explicit maintenance operation for an already installed
+Linux host. It never starts services. Use only with approval to initialize new
+application history. Existing state, OAuth credentials and backups are retained.
+Install persistent start inhibitors first, then stop all five application services
+and surviving service-account workers using the existing administration procedure.
+Keep `bridge-firewall.service` running. Run this shell block as root:
+
+```sh
+install -m 0600 /dev/null /etc/bridge/fresh-state-maintenance
+for unit in bridge-ui bridge-supervisor bridge-conductor bridge-zk bridge-proxy; do
+  install -d -m 0755 "/etc/systemd/system/$unit.service.d"
+  test ! -e "/etc/systemd/system/$unit.service.d/90-fresh-state.conf" || exit 1
+  printf '[Unit]\nConditionPathExists=!/etc/bridge/fresh-state-maintenance\n' > "/etc/systemd/system/$unit.service.d/90-fresh-state.conf"
+  chmod 0644 "/etc/systemd/system/$unit.service.d/90-fresh-state.conf"
+done
+systemctl daemon-reload
+```
+
+The helper requires these exact root-owned inhibitors to be the only loaded
+drop-ins for each unit, a private root-owned marker, `NeedDaemonReload=no`, stopped
+units and no real/effective service-user processes. Additional overrides require
+operator review before this deliberately narrow guard can accept the host.
+Coordinate maintenance exclusively: no operator may remove inhibitors or start
+services during preservation. After stopping the stack:
+
+```sh
+sudo python3 deploy/fresh_state.py --approved-fresh-state /var/lib/bridge-preserved-UNIQUE
+```
+
+The destination must not exist, must share the Rama/ZooKeeper filesystem, and
+must have an existing root-owned parent without group/world write permission.
+The CLI has no alternate filesystem-root option. Before moving any state it
+checks service inhibitors and absence of service-account processes, available space,
+required sources, and path safety. It writes a private `state.tar`, compares
+archived file bytes and symlink targets with the stopped sources, and records
+`state.tar.sha256`. The archive contains whole Rama, ZooKeeper and proxy roots,
+`/etc/bridge`, `/opt/bridge`, installed bridge units and their persistent drop-ins.
+Runtime symlinks are preserved without dereferencing; this assumes the installed
+runtime payload is contained under `/opt/bridge`, as the installer specifies.
+The archive contains secrets: keep the directory root-only and use encrypted
+backup transport. No archive or old backup is deleted.
+
+After a second stopped-process check, the helper renames both complete state
+roots into the preservation directory. Individual renames are atomic; the pair
+is not a filesystem transaction. It creates new private Rama `data` and `locks`
+and ZooKeeper `data` and `txn` directories at their usual paths, preserving service
+ownership. Only Rama bearer and licenses are copied to the new domain. Old data,
+locks, diagnostics and ZooKeeper history stay under the private preservation
+root, including the original lock inode. Proxy/OAuth state stays in place.
+Success creates `INITIALIZED`; services remain inhibited.
+
+Any failure leaves services inhibited and never automatically restores or starts a
+partially initialized domain. Inspect original and preserved paths plus the
+archive before further action. Do not rerun against the same destination or
+start a mixture of old/new roots. This is filesystem preservation, not proof
+that legacy state can run. A working restore requires separate isolated runtime
+validation. Once initialization succeeds, remove only `90-fresh-state.conf` from each application unit, remove
+`/etc/bridge/fresh-state-maintenance`, run `systemctl daemon-reload`, start the stack and submit the validated module using `admin.sh`; verify
+streaming, replay, and restart before accepting the deployment.
