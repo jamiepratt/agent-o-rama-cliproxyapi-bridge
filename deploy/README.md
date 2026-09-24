@@ -1,14 +1,15 @@
 # Private single-host deployment
 
-[Issue #5 remains open](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/5).
+[Issue #5 deployment acceptance completed](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/5).
 The validated build is deployed privately on the existing Ubuntu 24.04 VPS with
 fresh application state and complete old state preserved. Real provider
 stream/replay, reboot recovery, bounded fixture load, encrypted off-host backup
 and an isolated working restore passed on 2026-09-24. See
 [deployment evidence](DEPLOYMENT-2026-09-24.md) for exact artifact, scope and limits.
-This is a verified deployment slice, not full acceptance: cross-artifact/runtime
-upgrade and rollback plus actual OAuth reauthentication remain unperformed under
-[#5](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/5).
+A distinct CLIProxyAPI 7.3.15 -> 7.3.16 -> 7.3.15 upgrade/rollback and
+owner-confirmed OAuth reauthentication also passed. See [proxy maintenance](PROXY-UPDATE.md)
+and [private reauthentication](REAUTH.md). This does not establish compatibility
+for rebuilt application JARs or other runtime upgrades.
 [End-to-end acceptance is tracked in #8](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/8).
 
 ## Payload and trust
@@ -320,7 +321,8 @@ and release directories. This installer refuses to overwrite a host; it is not a
 runtime upgrade engine. Follow Rama's documented atomic-version procedure and
 same-version restore rule, preserve the previous whole release and full snapshot,
 and do not point `current` at a new major/minor runtime while old workers run.
-Cross-artifact and runtime upgrade/rollback remain unperformed under #5.
+The proxy-only patch drill in [deployment evidence](DEPLOYMENT-2026-09-24.md)
+passed; it does not validate rebuilt JARs or Rama/AOR upgrades.
 A same-artifact update alone does not establish cross-build state compatibility.
 
 ## Sources and local verification
@@ -339,8 +341,9 @@ corrupt checksum rejection, private runtime configuration, shell syntax, Maven
 packaging and module construction against the Rama distribution. Those macOS
 checks did not establish Linux or production behavior. Subsequent target checks
 are recorded in [2026-09-24 deployment evidence](DEPLOYMENT-2026-09-24.md), including
-Linux service behavior, reboot, load and isolated recovery. OAuth reauthentication
-and cross-artifact/runtime upgrade/rollback are still unperformed.
+Linux service behavior, reboot, load and isolated recovery. The later same-day evidence includes owner-confirmed OAuth reauthentication
+and a distinct proxy patch upgrade/rollback; broader runtime/JAR upgrades remain
+outside that evidence.
 
 Reproduce local checks from the repository root:
 

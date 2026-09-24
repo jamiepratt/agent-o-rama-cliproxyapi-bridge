@@ -1,9 +1,10 @@
 # Human OAuth reauthentication checkpoint
 
 Issue [#5](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/5)
-remains open until the real account owner completes reauthentication and the
-operator verifies the resulting credential with a fresh provider stream and
-saved replay. Existing working authentication does not satisfy this checkpoint.
+requires the real account owner to complete reauthentication and the operator
+to verify the resulting credential with a fresh provider stream and saved replay.
+The completed 2026-09-24 checkpoint is recorded in [deployment evidence](DEPLOYMENT-2026-09-24.md).
+Existing working authentication alone does not satisfy this checkpoint.
 
 Do this only when the owner is ready, in their private, unrecorded terminal.
 Do not run the login command through an agent tool, tee, shell tracing, a job

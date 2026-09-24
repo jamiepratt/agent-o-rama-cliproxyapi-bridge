@@ -3,10 +3,11 @@
 The validated module runs on the existing private VPS with fresh application
 state. Complete legacy state and existing backups remain preserved. Streaming,
 replay, reboot, bounded fixture load and an isolated working restore passed.
-This does not close [deployment issue #5](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/5)
-or [end-to-end acceptance #8](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/8).
-Cross-artifact/runtime upgrade and rollback and actual human OAuth
-reauthentication were not performed. Legacy recovery is not claimed.
+The later proxy upgrade/rollback and owner-confirmed reauthentication below
+complete [deployment issue #5](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/5);
+[end-to-end acceptance #8](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/8) remains separate.
+This validates a distinct proxy patch transition, not a rebuilt application JAR
+or Rama/Agent-o-rama upgrade. Legacy recovery is not claimed.
 
 ## Artifact and host
 
@@ -117,3 +118,127 @@ unchanged by the drill. Private target logs remain under
 `/var/tmp/bridge-restore-b03-20260924/drill-eUzQhGiw`.
 This is a working same-version restore, beyond extraction verification. It does
 not test provider account reauthentication or a different artifact/runtime.
+
+
+## Distinct pinned proxy upgrade and rollback
+
+The later same-day drill upgraded the real CLIProxyAPI binary from 7.3.15 to
+7.3.16, then rolled back to 7.3.15. Production remains on 7.3.15 after the
+successful rollback. Both releases remain under `/opt/bridge/releases/`.
+Rama 1.9.0, AOR 0.10.0, ZooKeeper 3.9.6 and the exact module JAR above never
+changed. The new release links the original Rama/ZooKeeper directories.
+
+Official [release 7.3.16](https://github.com/router-for-me/CLIProxyAPI/releases/tag/v7.3.16)
+and the [complete source comparison](https://github.com/router-for-me/CLIProxyAPI/compare/v7.3.15...v7.3.16)
+were inspected before mutation. Codex login/token storage, executor, translators
+and configuration schema are unchanged; shared quota, priority and logging
+behavior does change. No credential migration was found in that comparison.
+This source evidence supported the bounded drill; it is not a publisher guarantee
+of arbitrary backward compatibility.
+
+| Pin | 7.3.15 baseline/rollback | 7.3.16 candidate |
+| --- | --- | --- |
+| Source commit | `673131f57484517c3a1eae7e36c4cfa7b9bb4efc` | `c404af96ebacedf8168b3c2bdbf4449a21cd1c1e` |
+| Official Linux amd64 archive SHA-256 | `801c3a23061d57a830e67fcd033fda26e96c2bfe93e1b2e34e4428ed7defc7e5` | `64f84d7a08570f8e5310707857bc9edfb032292a9753b5f840da6c8caa325a72` |
+| Executable SHA-256 | `370d68b028b2906493eee0cc37562f295c74cc188e8114373776ee52d31f459b` | `3e5ef2dd28c008ca3d6dc2e10bbeb6d880e83d0deea59e07d4e9050c8fe22abb` |
+
+Both downloaded archives matched publisher checksums and GitHub asset digests.
+The actual running executable, through `/proc/PID/exe`, matched the candidate
+hash after upgrade and the baseline hash after rollback.
+
+Before switching, normal graceful shutdown reached `cluster-shutdown-complete`
+on Conductor port 8888. A new application-consistent encrypted snapshot,
+`c4cc8739cd90d6b6750ca4ae8e9ec10c43666bc578bbc0a7091eeb50b0da7787`,
+was created at 2026-09-24T16:15:10Z; `restic check` passed. The stack restarted
+on its retained state. Initial UI startup retried once while the cluster opened;
+module metrics and both UIs subsequently passed before the live drill.
+
+Isolated component checks preceded live switching:
+
+- The real old/new/old binaries each started twice in network namespace
+  `4026532292`, distinct from host `4026531840`, with only loopback and no
+  external routes. Six fixture streams passed, each with two ordered content
+  chunks, usage 7/2/9 and exactly one fixture dispatch. No real account was used
+  in this fixture configuration.
+- A private copy of OAuth/configuration from the verified prior restored snapshot
+  booted on old/new/old. All three exposed the same 13-model inventory; copied
+  credential bytes and source manifests remained unchanged. No provider request
+  or login was possible in this namespace. An initial empty-registry startup
+  race exposed a harness readiness defect; the corrected bounded wait passed.
+- These are proxy component checks. The earlier whole-cluster same-version
+  restore above is separate evidence; no different Rama/JAR restore is claimed.
+
+The [guarded release helper](PROXY-UPDATE.md) staged the candidate, checked exact
+hashes and unchanged runtime paths, and switched `current` atomically after
+stopping the proxy and checking that no proxy-account process remained. Client
+submissions were paused and active/queued gauges were zero before each switch.
+The successful live sequence was:
+
+| Stage | Saved replay | Fresh stream | Readiness refresh |
+| --- | --- | --- | --- |
+| Baseline 7.3.15 after owner login | Exact match, zero extra dispatches | One dispatch | available/configured/verified true |
+| Upgrade 7.3.16 | Exact baseline text/chunks/usage, zero dispatches | One dispatch | available/configured/verified true |
+| Rollback 7.3.15 | Exact baseline text/chunks/usage, zero dispatches | One dispatch | available/configured/verified true |
+
+Every fresh stream reported usage 307/5/312; saved replay retained that exact
+usage. Probes used `deploy/probe.clj` and private record
+`/var/lib/bridge-rama/probe-b04/record.edn` within its one-hour TTL.
+Readiness's separate small provider completion is not an adapter dispatch.
+
+Across both switches, non-proxy service PIDs remained unchanged, the live and
+preserved lock inodes stayed 2098247 and 526255, and the original runtime,
+configuration and live OAuth byte manifests were unchanged. Durable application
+history was retained, with saved replay checked above. All six units are active.
+The original module digest is still
+`f3145e3596733590b3487dcd4348f94311f821743b2734fb5801ce2dda10289c`.
+
+Final public IPv4/IPv6 probes could not reach any tested current listener or
+boundary port: 22, 53, 1973, 1974, 2181, 5432, 8785, 8888, 18317, 18318,
+20000, 20001, 20002, 20241, 21000, 35515, 37117, 56746 and 40012.
+Bridge access over Tailscale remained limited to SSH and the two UIs. Tailscale's
+own daemon listener 56746 was also tailnet-reachable; it is not a bridge service.
+Firewall structure, ignoring only traffic counters, was unchanged.
+
+All five encrypted snapshots remain, including the legacy and fresh snapshots
+listed above. Both preserved archives remain mode 0600 with their recorded byte
+sizes. No state, old release, credential, archive or backup was deleted.
+Private drill artifacts remain in `/var/tmp/bridge-b04-evidence` and
+`/var/tmp/bridge-proxy-drill-b04`; all isolated test processes exited.
+
+## Owner-confirmed OAuth reauthentication
+
+The account owner explicitly confirmed completing a fresh Codex device login on
+the VPS during this task. The agent did not observe or capture the browser flow,
+device code, tokens or auth JSON. No additional login flow was launched.
+The current credential differs from the prior restored snapshot, matches the
+same intended account on two privately compared identity fields, and remains
+one service-owned 0600 file in the private auth directory.
+
+The baseline live stream/replay and explicit readiness refresh above validate the
+resulting login, followed by successful upgrade and rollback provider checks.
+Owner attestation plus these results complete the reauthentication checkpoint;
+a merely healthy pre-existing credential alone would not do so. The
+[private reauthentication runbook](REAUTH.md) remains available for future use.
+No deliberate expiration, revocation or forced refresh failure was performed.
+
+## Batch validation and acceptance scope
+
+The portable deployment suite ran 34 tests: 31 passed and three expected host skips;
+the five existing IPC/spike Python tests and shell syntax checks passed.
+On the target, four checks passed with one uninstalled-host-only skip, including
+real nft parser validation, unchanged rules and both UIs/durable module metrics.
+The unchanged application JAR did not require another expensive packaged suite.
+
+TDD evidence covers rejected archive checksums without mutation, staged releases
+preserving runtime/state, failed-start recovery restoring the prior release,
+process/stale-target guards, isolated fixture protocol and copied OAuth bootstrap.
+The empty-model startup regression first reproduced the actual failure, then
+passed with a bounded retry. Failed-candidate service recovery is unit-tested;
+the live rollback was an intentional successful-version rollback.
+
+Together with the earlier host, reboot, memory/load and working-restore evidence,
+this satisfies #5's original deployment criteria. The distinct pinned transition
+is specifically CLIProxyAPI 7.3.15 -> 7.3.16 -> 7.3.15. It does not establish
+rebuilt application bytecode, Rama/AOR upgrades, schema migrations, arbitrary
+crash recovery, or legacy-history recovery. #8's full end-to-end acceptance and
+#1's parent acceptance remain separate.
