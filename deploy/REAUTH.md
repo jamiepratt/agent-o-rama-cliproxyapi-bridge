@@ -14,6 +14,10 @@ checkpoint, not a request for another deployment approval.
 
 ## Private terminal command
 
+Before starting, pause every client that can submit work and verify active and
+queued calls have drained to zero using authenticated adapter metrics. Keep
+clients paused throughout login and until the original proxy is healthy again.
+
 Connect with `ssh -t bridge-vps`, then enter the block below. It takes the same
 maintenance lock as `admin.sh`, stops only the proxy, preserves its complete
 state in a new root-only backup, and authenticates into a separate empty auth

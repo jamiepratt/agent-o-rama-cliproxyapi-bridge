@@ -256,10 +256,10 @@ sudo /opt/bridge/admin.sh --approved-maintenance backup --confirmed-cluster-shut
 Stop new clients before shutdown. An authorized operator or agent must verify the
 Conductor state before passing the confirmation flag; `admin.sh` does not verify
 it automatically. The documented JSON endpoint is `GET /d/conductor/` with
-`Accept: application/json`, on the private Conductor UI at port 1974. Its shutdown
+`Accept: application/json`, on the private Conductor UI at port 8888. Its shutdown
 state must be exactly `["cluster-shutdown-complete"]`. For example, inspect the
 response using `curl --fail --silent --show-error -H 'Accept: application/json'
-http://127.0.0.1:1974/d/conductor/` from the host. Existing explicit maintenance
+http://127.0.0.1:8888/d/conductor/` from the host. Existing explicit maintenance
 authorization covers this observation and shutdown/backup operation; it does not
 require a new human approval. Backup then stops UI/proxy/all Rama
 services and ZooKeeper, verifies no process remains for any service user, and

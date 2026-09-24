@@ -32,9 +32,12 @@ regular `cli-proxy-api` member. Other members are ignored, never extracted.
    It refuses an existing destination and identical executable hashes. An
    interrupted stage may leave an incomplete destination; it never changes
    current. Inspect it and use a fresh release basename for a retry.
-3. Complete the isolated restored-state compatibility drill with a fake upstream
-   before live switching. Verify streaming, saved replay, readiness, state and
-   lock identity. Keep external routes disabled in that drill.
+3. Before live switching, complete the isolated proxy-component fixture drill:
+   old/new/old streaming and restarts, plus copied-credential bootstrap. Keep
+   external routes disabled. These checks do not replay Rama history. After
+   each live upgrade and rollback, verify authenticated readiness, real
+   streaming, saved replay, history and lock identity. The existing same-version
+   whole-state restore drill is separate evidence.
 4. Pause every client that can submit work. Verify active and queued calls have
    drained to zero using the authenticated adapter metrics. The helper cannot
    establish submission quiescence itself. `--clients-quiesced` records the
