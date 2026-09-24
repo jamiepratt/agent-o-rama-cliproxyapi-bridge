@@ -1,5 +1,6 @@
 """Run with root/CAP_NET_ADMIN on Linux; checks never apply firewall rules."""
 import os
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -8,6 +9,59 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def ruleset_structure(raw):
+    """Ignore only packet/byte totals in nft counter statements and objects."""
+    def normalize(value, counter=False):
+        if isinstance(value, list):
+            return [normalize(item) for item in value]
+        if isinstance(value, dict):
+            return {key: normalize(item, counter=(key == 'counter'))
+                    for key, item in value.items()
+                    if not (counter and key in ('packets', 'bytes'))}
+        return value
+    return normalize(json.loads(raw))
+
+
+class FirewallComparisonTests(unittest.TestCase):
+    def test_live_counter_values_do_not_change_ruleset_structure(self):
+        before = {"nftables": [{"rule": {"family": "ip", "table": "filter",
+                  "expr": [{"counter": {"packets": 87978, "bytes": 100000}},
+                           {"accept": None}]}},
+                  {"counter": {"family": "inet", "table": "filter", "name": "traffic",
+                               "packets": 12, "bytes": 100}}]}
+        after = json.loads(json.dumps(before))
+        after['nftables'][0]['rule']['expr'][0]['counter'].update(packets=87979, bytes=100060)
+        after['nftables'][1]['counter'].update(packets=13, bytes=160)
+        self.assertEqual(ruleset_structure(json.dumps(before)),
+                         ruleset_structure(json.dumps(after)))
+
+
+    def test_policy_changes_remain_visible(self):
+        before = {"nftables": [{"table": {"family": "inet", "name": "bridge_private"}},
+                  {"rule": {"table": "bridge_private", "expr": [
+                      {"counter": {"packets": 1, "bytes": 60}}, {"accept": None}]}},
+                  {"counter": {"name": "traffic", "packets": 1, "bytes": 60}},
+                  {"rule": {"expr": [{"quota": {"bytes": 1000}}]}}]}
+        for change in ('table', 'verdict', 'counter-name', 'quota', 'counter-removal', 'order'):
+            with self.subTest(change=change):
+                after = json.loads(json.dumps(before))
+                objects = after['nftables']
+                if change == 'table':
+                    objects[0]['table']['name'] = 'other'
+                elif change == 'verdict':
+                    objects[1]['rule']['expr'][1] = {'drop': None}
+                elif change == 'counter-name':
+                    objects[2]['counter']['name'] = 'other'
+                elif change == 'quota':
+                    objects[3]['rule']['expr'][0]['quota']['bytes'] = 2000
+                elif change == 'counter-removal':
+                    objects[1]['rule']['expr'].pop(0)
+                else:
+                    objects[1]['rule']['expr'].reverse()
+                self.assertNotEqual(ruleset_structure(json.dumps(before)),
+                                    ruleset_structure(json.dumps(after)))
 
 
 @unittest.skipUnless(shutil.which('nft') and os.geteuid() == 0,
@@ -21,7 +75,8 @@ class FirewallParserTests(unittest.TestCase):
                                 capture_output=True, text=True)
         after = subprocess.run(['nft', '-j', 'list', 'ruleset'],
                                capture_output=True, text=True, check=True).stdout
-        self.assertEqual(before, after, 'check-only validation changed rules')
+        self.assertEqual(ruleset_structure(before), ruleset_structure(after),
+                         'check-only validation changed rules')
         self.assertEqual(0, result.returncode, result.stderr)
 
     @unittest.skipIf(Path('/opt/bridge').exists() or Path('/etc/bridge').exists(),
