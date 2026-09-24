@@ -2,6 +2,12 @@
 
 Implemented for [issue #6](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/6) and [issue #3](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/3), on the pinned runtime in [README.md](README.md).
 
+The current source-packaged artifact has unresolved cold-JVM closure-class
+availability failures. The [single-map experiment](CAPTURES.md) preserves
+operation semantics under matching class availability but is **NO-GO for the
+complete persistence acceptance gate**. Prospective class stability is tracked
+in [issue #22](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/22).
+
 `bridge.module/proxy-module` now wraps the official streaming model with
 `bridge.replay/replay-model`, inside Agent-o-rama's model instrumentation.
 The live suite writes `adapter-evidence.json`; `evidence.json` preserves the

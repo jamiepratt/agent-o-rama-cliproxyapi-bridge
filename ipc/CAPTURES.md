@@ -160,6 +160,53 @@ zero failures/errors. It pauses the returned pending binding at the external AOR
 store boundary, allows the first real fake-upstream call to finish, then verifies
 replay with no second upstream request. Product code was unchanged for this test.
 
-These direct closure/path probes and IPC tests do not constitute a real Rama
-process restart. The fresh-cluster result and final combined validation belong to
-the separate acceptance evidence on issue #21.
+These direct closure/path probes and IPC tests do not themselves constitute a
+real Rama process restart. The separate fresh-cluster test is recorded below.
+
+## Final combined regression validation
+
+The final actual-distribution packaged suite passed **46 tests / 628 assertions,
+zero failures/errors**, including the missing completion race, all thirteen
+captured-map sites, concurrency, duplicate delivery, FIFO, cancellation, receipts
+and metrics. This supersedes the earlier incomplete capture-coverage result.
+The standalone command suite passed **3 tests / 21 assertions**. Seven Python
+regressions passed; three Linux/deployed-host checks were skipped as expected.
+
+The packaged suite also wrote the five actual metrics closures to a synthetic
+corpus. Fresh readers with perturbation 1000 and with module-first loading plus
+perturbation 10000 both preserved metric semantics and unrelated entries. Each
+closure retained one `params java.lang.Object` field. These metrics classes kept
+the same names in both tested readers; this does not negate the admission and
+reservation class-name failures above.
+
+Prospective deterministic class packaging and full-path persistence are tracked
+in [issue #22](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/22).
+Issue #21 remains open for its original unmet acceptance gates. Legacy recovery
+is outside this experiment and does not block the prospective investigation.
+
+## Fresh native cluster restart
+
+A new local macOS cluster used the pinned Rama distribution and ZooKeeper 3.9.6,
+fresh temporary state, a loopback fake SSE upstream and a fixture module entrypoint
+calling the actual `bridge.module/proxy-module`. The fixture deployment JAR had
+SHA-256 `a590fd2e6910eca3d152f35944f9c34776ed855f54d9a6346df0e537960d89ee`.
+Its only additional ZIP entry was `bridge/cold_fixture.clj`; every original
+application artifact entry was byte-for-byte unchanged.
+
+Warm streaming returned `one two` with chunks `["one" " two"]`, one upstream
+request, readable completed/admission PStates and eleven persisted receipts.
+The harness then requested normal Rama cluster shutdown and observed
+`cluster-shutdown-complete`. The worker exited; ZooKeeper, conductor, supervisor
+and fake upstream were stopped. Process inspection found no owned JVMs and all
+test listeners were closed before restarting the same retained state.
+
+After restart, completed replay returned identical chunks, text and usage with
+the upstream request count still one. A new identity streamed successfully and
+increased that count to two. Completed/admission PStates and fourteen receipts
+were readable after replay. No generated-class loading failure occurred in this
+normal orderly restart. All experimental processes were stopped afterward.
+
+**GO for this observed fresh-state, normal-startup process restart on the tested
+artifact; overall NO-GO for #21's broader loading-history requirement.** This
+does not establish arbitrary namespace-order safety, legacy-state recovery,
+cross-version compatibility, Linux/systemd behavior or production deployment.
