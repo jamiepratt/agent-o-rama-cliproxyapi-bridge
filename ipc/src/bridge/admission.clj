@@ -96,19 +96,25 @@
             domain (:domain options)
             limits (select-keys options [:active-limit :queue-limit])]
         (change! state
-                 (fn [current]
-                   (let [current (assoc-in current [:waiter-expires candidate] (+ now waiter-lease-ms))]
-                     (if (and (seq (:entries current))
-                              (or (and (:domain current) (not= (:domain current) domain))
-                                  (and (:limits current) (not= (:limits current) limits))))
-                       (assoc-in current [:waiters candidate] :invalid-configuration)
-                       (-> (register current identity call-id candidate limits now)
-                           (assoc :domain domain :limits limits)))))))
+                 (let [params {:candidate candidate :now now :domain domain :limits limits :identity identity :call-id call-id}]
+                   (fn [current]
+                     (let [{:keys [candidate now domain limits identity call-id]} params
+                           current (assoc-in current [:waiter-expires candidate] (+ now waiter-lease-ms))]
+                       (if (and (seq (:entries current))
+                                (or (and (:domain current) (not= (:domain current) domain))
+                                    (and (:limits current) (not= (:limits current) limits))))
+                         (assoc-in current [:waiters candidate] :invalid-configuration)
+                         (-> (register current identity call-id candidate limits now)
+                             (assoc :domain domain :limits limits))))))))
       (let [generation (get-in (snapshot state (:stopped? options)) [:waiters candidate])]
         (when (keyword? generation)
           (release-fence! {:fence fence})
           (locks/remove-retired! directory candidate)
-          (change! state #(-> % (update :waiters dissoc candidate) (update :waiter-expires dissoc candidate)))
+          (change! state
+                   (let [params {:candidate candidate}]
+                     (fn [current]
+                       (let [{:keys [candidate]} params]
+                         (-> current (update :waiters dissoc candidate) (update :waiter-expires dissoc candidate))))))
           (throw (ex-info "Model call admission rejected" {:type (keyword "bridge.admission" (name generation))})))
         (let [owner? (= candidate generation)]
           (when-not owner?
@@ -128,8 +134,12 @@
 (defn heartbeat! [{:keys [state candidate heartbeat-at]}]
   (let [now (System/currentTimeMillis) previous @heartbeat-at]
     (when (and (<= previous now) (compare-and-set! heartbeat-at previous (+ now 15000)))
-      (change! state #(if (contains? (:waiters %) candidate)
-                        (assoc-in % [:waiter-expires candidate] (+ now waiter-lease-ms)) %)))))
+      (change! state
+               (let [params {:candidate candidate :now now}]
+                 (fn [current]
+                   (let [{:keys [candidate now]} params]
+                     (if (contains? (:waiters current) candidate)
+                       (assoc-in current [:waiter-expires candidate] (+ now waiter-lease-ms)) current))))))))
 
 (defn claim-reservation! [{:keys [state candidate generation directory stopped?] :as call}]
   (let [current (entry call)]
@@ -144,10 +154,14 @@
           (catch Throwable error (.close ^Closeable fence) (throw error)))))))
 
 (defn mark-dispatched! [{:keys [state generation] :as call}]
-  (change! state #(let [current (get-in % [:entries generation])]
-                    (if (and current (not (:terminal? current)) (not (:cancelled? current)))
-                      (cond-> (assoc-in % [:entries generation :dispatched?] true)
-                        (not (:dispatched? current)) (metrics/increment :dispatches)) %)))
+  (change! state
+           (let [params {:generation generation}]
+             (fn [state-value]
+               (let [{:keys [generation]} params
+                     current (get-in state-value [:entries generation])]
+                 (if (and current (not (:terminal? current)) (not (:cancelled? current)))
+                   (cond-> (assoc-in state-value [:entries generation :dispatched?] true)
+                     (not (:dispatched? current)) (metrics/increment :dispatches)) state-value)))))
   (let [current (entry call)]
     (when-not current (throw (ex-info "Admission generation expired" {:type ::generation-expired})))
     (and (:dispatched? current) (not (:terminal? current)) (not (:cancelled? current)))))
@@ -171,10 +185,14 @@
       (throw error))))
 
 (defn chunk! [{:keys [state generation]} chunk]
-  (change! state #(if (or (nil? (get-in % [:entries generation]))
-                          (get-in % [:entries generation :cancelled?])
-                          (get-in % [:entries generation :terminal?]))
-                    % (update-in % [:entries generation :chunks] conj chunk))))
+  (change! state
+           (let [params {:generation generation :chunk chunk}]
+             (fn [current]
+               (let [{:keys [generation chunk]} params]
+                 (if (or (nil? (get-in current [:entries generation]))
+                         (get-in current [:entries generation :cancelled?])
+                         (get-in current [:entries generation :terminal?]))
+                   current (update-in current [:entries generation :chunks] conj chunk)))))))
 
 (defn discard-unused [current generation]
   (if (and (get-in current [:entries generation :terminal?])
@@ -205,11 +223,13 @@
   (try
     (let [now (System/currentTimeMillis)]
       (change! state
-               (fn [current]
-                 (let [call-id (get-in current [:entries generation :call-id])
-                       next (if (cancelled? current call-id now)
-                              (assoc-in current [:cancellations call-id] (+ now cancellation-retention-ms)) current)]
-                   (discard-unused (complete next generation (assoc terminal :expires-at (+ now cancellation-retention-ms))) generation)))))
+               (let [params {:generation generation :terminal terminal :now now}]
+                 (fn [current]
+                   (let [{:keys [generation terminal now]} params
+                         call-id (get-in current [:entries generation :call-id])
+                         next (if (cancelled? current call-id now)
+                                (assoc-in current [:cancellations call-id] (+ now cancellation-retention-ms)) current)]
+                     (discard-unused (complete next generation (assoc terminal :expires-at (+ now cancellation-retention-ms))) generation))))))
     (finally (release-fence! call)))
   ;; A failed write or queued handoff is not retirement: its inode must survive.
   (locks/remove-retired! directory generation))
@@ -239,19 +259,25 @@
   (let [state (open-state node)
         now (System/currentTimeMillis)]
     (change! state
-             (fn [current]
-               (reduce (fn [next [generation entry]]
-                         (if (and (= call-id (:call-id entry)) (not (:terminal? entry)))
-                           (if (= :queued (:phase entry))
-                             (complete next generation {:terminal? true :cancelled? true :expires-at (+ now cancellation-retention-ms)})
-                             (assoc-in next [:entries generation :cancelled?] true))
-                           next))
-                       (assoc-in current [:cancellations call-id] (+ now cancellation-retention-ms))
-                       (:entries current))))
+             (let [params {:call-id call-id :now now}]
+               (fn [current]
+                 (let [{:keys [call-id now]} params]
+                   (reduce (fn [next [generation entry]]
+                             (if (and (= call-id (:call-id entry)) (not (:terminal? entry)))
+                               (if (= :queued (:phase entry))
+                                 (complete next generation {:terminal? true :cancelled? true :expires-at (+ now cancellation-retention-ms)})
+                                 (assoc-in next [:entries generation :cancelled?] true))
+                               next))
+                           (assoc-in current [:cancellations call-id] (+ now cancellation-retention-ms))
+                           (:entries current))))))
     {:cancelled true}))
 
 (defn leave! [{:keys [state candidate generation]}]
-  (change! state #(discard-unused (-> % (update :waiters dissoc candidate) (update :waiter-expires dissoc candidate)) generation)))
+  (change! state
+           (let [params {:candidate candidate :generation generation}]
+             (fn [current]
+               (let [{:keys [candidate generation]} params]
+                 (discard-unused (-> current (update :waiters dissoc candidate) (update :waiter-expires dissoc candidate)) generation))))))
 
 (defn prune [now current]
   (let [expired (set (for [[generation entry] (:entries current)

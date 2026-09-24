@@ -88,11 +88,18 @@
            :result result :chunks chunks :expires-at expires-at)
     entry))
 
+(defn reservation-transform
+  "The direct reservation closure, independent of Rama's generated path wrapper."
+  [params]
+  (fn [entry]
+    (let [{:keys [now digest candidate]} params]
+      (reserve-entry entry now digest candidate))))
+
 (defn bind-call! [state identity digest]
   (loop []
     (let [now (System/currentTimeMillis)
           candidate (str (UUID/randomUUID))]
-      (store/pstate-transform! [identity (term #(reserve-entry % now digest candidate))] state identity)
+      (store/pstate-transform! [identity (term (reservation-transform {:now now :digest digest :candidate candidate}))] state identity)
       (let [entry (store/pstate-select-one [identity] state)]
         (if (or (nil? entry) (expired? (System/currentTimeMillis) entry))
           (recur)
@@ -116,7 +123,11 @@
         (let [{:keys [node identity call-id observation-id]} *call*
               metric-state (admission/open-state node)
               started (System/nanoTime)]
-          (admission/change! metric-state #(metrics/begin % observation-id (System/currentTimeMillis)))
+          (admission/change! metric-state
+                             (let [params {:observation-id observation-id}]
+                               (fn [current]
+                                 (let [{:keys [observation-id]} params]
+                                   (metrics/begin current observation-id (System/currentTimeMillis))))))
           (try
             (let [_ (admission/check-cancelled! node call-id)
                   state (aor/get-store node "$$completed-calls")
@@ -125,10 +136,18 @@
                   generation (:generation entry)
                   completed-depot (aor/get-depot node "*completed-changes")]
               (when (not= digest (:fingerprint entry))
-                (admission/change! metric-state #(metrics/increment % :conflicts))
+                (admission/change! metric-state
+                                   (let [params {:metric :conflicts}]
+                                     (fn [current]
+                                       (let [{:keys [metric]} params]
+                                         (metrics/increment current metric)))))
                 (throw (ex-info "Model-call identity conflicts with recorded request" {:type ::identity-conflict})))
               (if (:result entry)
-                (do (admission/change! metric-state #(metrics/increment % :replays))
+                (do (admission/change! metric-state
+                                       (let [params {:metric :replays}]
+                                         (fn [current]
+                                           (let [{:keys [metric]} params]
+                                             (metrics/increment current metric)))))
                     (doseq [chunk (:chunks entry)] (.onPartialResponse ^StreamingChatResponseHandler handler ^String chunk))
                     (.onCompleteResponse ^StreamingChatResponseHandler handler (decode-response (:result entry))))
                 (let [call (admission/join! node [identity digest] call-id options)
@@ -142,7 +161,11 @@
                                       (admission/finish! call {:terminal? true :cancelled? true})
                                       (if-let [saved-entry (let [latest (admission/await-operation (rama/foreign-select-one-async [identity] (store/get-underlying-pstate state)) (:stopped? call))] (when (and (:result latest) (= generation (:generation latest)) (= digest (:fingerprint latest))) latest))]
                                         (let [saved (:result saved-entry)]
-                                          (admission/change! metric-state #(metrics/increment % :replays))
+                                          (admission/change! metric-state
+                                                             (let [params {:metric :replays}]
+                                                               (fn [current]
+                                                                 (let [{:keys [metric]} params]
+                                                                   (metrics/increment current metric)))))
                                           (doseq [chunk (:chunks saved-entry)] (admission/chunk! call chunk))
                                           (admission/finish! call {:terminal? true :result saved}))
                                         (if-not (admission/mark-dispatched! call)
@@ -185,4 +208,8 @@
                         (.onCompleteResponse ^StreamingChatResponseHandler handler (decode-response (:result outcome)))))))))
             (finally
               (let [seconds (/ (- (System/nanoTime) started) 1e9)]
-                (admission/change! metric-state #(metrics/elapsed % seconds))))))))))
+                (admission/change! metric-state
+                                   (let [params {:seconds seconds}]
+                                     (fn [current]
+                                       (let [{:keys [seconds]} params]
+                                         (metrics/elapsed current seconds)))))))))))))

@@ -11,6 +11,8 @@
             [bridge.observability :as obs]
             [bridge.observability-test :as obs-test]
             [bridge.admission :as admission]
+            [bridge.capture-test :as capture-test]
+            [taoensso.nippy :as nippy]
             [bridge.locks-test]
             [com.rpl.rama.test :as rtest]
             [bridge.module :as module]
@@ -80,7 +82,7 @@
    (let [calls (atom [])
          release (promise) race-release (promise) generation-release (promise) coalesce-release (promise)
          activity (atom {:active 0 :maximum 0})
-         bounded-release (into {"failure-shared" (promise) "deadline-shared" (promise) "expiry-coalesce" (promise) "expiry-cancel" (promise) "completion-expiry" (promise)}
+         bounded-release (into {"failure-shared" (promise) "deadline-shared" (promise) "expiry-coalesce" (promise) "expiry-cancel" (promise) "completion-expiry" (promise) "capture-race" (promise)}
                                (for [prefix ["bounded-" "cancel-" "restart-" "small-"] n (range 61)]
                                  [(str prefix n) (promise)]))
          gates (merge bounded-release {"pause" release "identity-race" race-release
@@ -104,7 +106,27 @@
            (finally (doseq [gate (vals gates)] (deliver gate true)))))
        (finally (.stop server 0) (.close ^java.util.concurrent.ExecutorService (.getExecutor server)))))))
 
-(use-fixtures :once with-ipc)
+(def ^:dynamic *require-complete-capture-inventory* false)
+
+(defn with-single-map-captures [test-fn]
+  (let [original admission/change!
+        observed (atom {})
+        violations (atom #{})]
+    (with-redefs [admission/change! (fn [state f]
+                                      (when-not (capture-test/single-map? f)
+                                        (swap! violations conj (.getName (class f))))
+                                      (swap! observed assoc (.getName (class f)) f)
+                                      (original state f))]
+      (test-fn))
+    (is (empty? @violations) (str "Invalid persisted captures: " @violations))
+    (doseq [f (vals @observed)] (capture-test/assert-single-map! f))
+    (when-let [file (System/getenv "BRIDGE_METRICS_CORPUS")]
+      (nippy/freeze-to-file file (into {} (filter #(str/starts-with? (key %) "bridge.replay$") @observed))))
+    (when *require-complete-capture-inventory*
+      (is (= 5 (count (filter #(str/starts-with? % "bridge.replay$") (keys @observed))))
+          "All five replay metrics producer sites must execute"))))
+
+(use-fixtures :once with-single-map-captures with-ipc)
 
 (deftest nested-stream-reaches-client-in-order
   (let [{:keys [client]} *context*
@@ -151,6 +173,45 @@
 
 (defn result-within [client invoke]
   (.get (aor/agent-result-async client invoke) 15 TimeUnit/SECONDS))
+
+(deftest completion-between-binding-read-and-dispatch-replays-without-another-upstream
+  (let [{:keys [client calls bounded-release]} *context*
+        before (count @calls)
+        request {:prompt "capture-race" :call-id "capture-race"}
+        first-call (aor/agent-initiate client request)
+        first-chunk (promise)
+        original-get-store aor/get-store
+        intercepted? (atom false)
+        pending? (atom false)]
+    (with-open [_stream (aor/agent-stream client first-call "model"
+                                          (fn [all _ _ _] (when (seq all) (deliver first-chunk true))))]
+      (try
+        (is (= true (deref first-chunk 10000 :timeout)))
+        ;; Pause a real external store read after it returns a pending binding.
+        ;; The first transport completes before the second caller can join admission.
+        (with-redefs [aor/get-store
+                      (fn [node name]
+                        (let [delegate (original-get-store node name)]
+                          (if (not= "$$completed-calls" name)
+                            delegate
+                            (java.lang.reflect.Proxy/newProxyInstance
+                             (.getClassLoader (class delegate))
+                             (.getInterfaces (class delegate))
+                             (reify java.lang.reflect.InvocationHandler
+                               (invoke [_ _proxy method args]
+                                 (let [entry (.invoke ^java.lang.reflect.Method method delegate args)]
+                                   (when (and (= "pstate_select_one_STAR_" (.getName ^java.lang.reflect.Method method))
+                                              (compare-and-set! intercepted? false true))
+                                     (reset! pending? (and (some? entry) (nil? (:result entry))))
+                                     (deliver (get bounded-release "capture-race") true)
+                                     (result-within client first-call))
+                                   entry)))))))]
+          (let [second-call (aor/agent-initiate client request)]
+            (is (= (result-within client first-call) (result-within client second-call)))))
+        (is @intercepted?)
+        (is @pending?)
+        (is (= 1 (- (count @calls) before)))
+        (finally (deliver (get bounded-release "capture-race") true))))))
 
 (deftest default-admission-is-ten-active-fifty-fifo-and-typed-overload
   (let [{:keys [client ipc module-name calls bounded-release]} *context*
@@ -617,6 +678,7 @@
 
 (defn -main [& _]
   (require 'bridge.admission-config-test 'bridge.runtime-test)
-  (let [{:keys [fail error]} (run-tests 'bridge.ipc-test 'bridge.admission-config-test 'bridge.locks-test 'bridge.observability-test 'bridge.runtime-test)]
+  (let [{:keys [fail error]} (binding [*require-complete-capture-inventory* true]
+                               (run-tests 'bridge.ipc-test 'bridge.admission-config-test 'bridge.locks-test 'bridge.observability-test 'bridge.runtime-test 'bridge.capture-test))]
     (shutdown-agents)
     (System/exit (if (zero? (+ fail error)) 0 1))))

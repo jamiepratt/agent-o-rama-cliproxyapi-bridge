@@ -1,0 +1,16 @@
+(dotimes [_ (Long/parseLong (or (System/getenv "HASH_PERTURB") "0"))] (System/identityHashCode (Object.)))
+(when (= "1" (System/getenv "BRIDGE_LOAD_MODULE_FIRST")) (require 'bridge.module))
+(require '[bridge.admission :as admission] '[taoensso.nippy :as nippy] '[com.rpl.nippy-serializable-fn])
+(let [[mode path] *command-line-args*]
+  (if (= mode "write")
+    (with-redefs [admission/open-state (constantly nil)
+                  admission/change! (fn [_ transform]
+                                      (println :class (.getName (class transform)))
+                                      (println :fields (mapv (fn [f] [(.getName f) (.getName (.getType f))]) (.getDeclaredFields (class transform))))
+                                      (nippy/freeze-to-file path transform))]
+      (admission/cancel! nil "cold-call"))
+    (let [_ (with-redefs [admission/open-state (constantly nil) admission/change! (fn [_ transform] (println :reader-class (.getName (class transform))) (println :reader-fields (mapv (fn [f] [(.getName f) (.getName (.getType f))]) (remove #(java.lang.reflect.Modifier/isStatic (.getModifiers %)) (.getDeclaredFields (class transform))))))] (admission/cancel! nil "cold-call")) transform (nippy/thaw-from-file path)
+          result (transform {})]
+      (assert (number? (get-in result [:cancellations "cold-call"])))
+      (println :cold-read-passed))))
+(shutdown-agents)
