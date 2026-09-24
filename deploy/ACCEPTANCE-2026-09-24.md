@@ -2,7 +2,8 @@
 
 Tracking: [acceptance #8](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/8)
 and [parent #1](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/1).
-This records verified behavior and remaining acceptance limits, not issue closure.
+All acceptance gates passed, including the final owner decisions and post-plan
+private-access checks below. Contract limits remain explicit.
 
 ## Evidence boundaries
 
@@ -107,23 +108,40 @@ Class B operations and 3.37 GB account-wide storage. The backup bucket displayed
 578.03 MB. These are dashboard observations, subject to usage reporting delay,
 not a promise of zero future charges or a finalized month-end invoice.
 
-The authenticated Tailscale billing page showed a **free Enterprise trial with
-13 days remaining**, one occupied seat and zero tagged resources. It explicitly
-asks the owner to choose a plan to avoid interruption. No continuing plan is
-selected. The displayed Standard option is $8/user/month; a separate personal-use
-plan option is offered. Neither was selected and no subscription was changed.
-The deployment uses Rama's free-license operating procedure. Current measured
-infrastructure cost is therefore the approved $10/month VPS plus $0 R2
-month-to-date and $0 during the Tailscale trial. Post-trial recurring total is
-not established; that concrete plan decision remains in #8.
+The initial Tailscale review found a free trial without a continuing plan.
+The owner subsequently confirmed non-commercial use and selected Personal in
+coordinator task `01a0d299-6d3b-7720-9441-62a53cb894b3`. The coordinator completed
+the approved switch. Independent inspection of the authenticated billing page
+then showed **Personal plan, Free**, seats 1/6 and tagged resources 0/50,
+without a trial. The deployment uses Rama's free-license operating procedure.
+The accepted ongoing infrastructure cost is therefore **$10/month VPS plus
+usage-billed R2 and free Personal Tailscale**. R2 was $0 month-to-date at the
+observation above; its future bill remains usage-dependent.
 
 The owner confirmed the selected account permits CLIProxyAPI use, recorded in
 [#7](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/7#issuecomment-5791042105).
 The approved parent scope explicitly selects one node and excludes high
-availability. Neither is a publisher guarantee of account continuity. A separate
-explicit acceptance of the residual outage/account risks was not found in the
-reviewed history: host loss requires restore, maintenance interrupts service,
-and quota, account access or provider changes can interrupt model service.
-The Tailscale plan decision and that human acceptance checkpoint stay in
-[#8](https://github.com/jamiepratt/agent-o-rama-cliproxyapi-bridge/issues/8);
-the parent remains open while #8 is incomplete.
+availability. During the final continuation, the owner explicitly accepted
+host-loss/restore outages, maintenance interruptions, and provider quota,
+account-access and service-change risks in the same coordinator task. This
+records owner acceptance, not a publisher guarantee of account continuity.
+
+## Post-plan private-access verification
+
+After the Personal switch, the refreshed saved Tailscale policy retained one
+grant from the approved administrator device to the VPS, limited to TCP 22,
+1974 and 8888. Its stored accept/deny tests remained present; no wildcard grant
+or policy edit was introduced. The local host firewall retained its default
+drop policy and matching Tailscale-only port allowlist.
+
+Fresh connections from the approved administrator reached SSH and both UIs;
+HTTP 1974 and 8888 each returned 200. TCP 1973, 2181, 18317, 18318, 20000 and
+20002 remained unreachable through the tailnet. SSH command execution worked.
+All six actual units (`bridge-zk`, `bridge-conductor`, `bridge-supervisor`,
+`bridge-ui`, `bridge-proxy`, `bridge-firewall`) were active. The deployed JAR
+digest remained the exact value recorded above. No runtime, credential, state,
+backup or application configuration changed in this final continuation.
+
+The final change is documentation and issue bookkeeping. Existing composed
+14-test/374-assertion evidence and deployment drills remain applicable; no
+costly suite, provider login or disruptive maintenance was repeated.
