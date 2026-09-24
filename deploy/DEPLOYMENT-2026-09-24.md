@@ -51,7 +51,11 @@ establish cross-version persistence compatibility or arbitrary crash recovery.
 Public IPv4 and IPv6 probes could not reach ports `22`, `1973`, `1974`, `2181`,
 `8888`, `18317`, `18318`, `20000`, `20001`, `21000` or observed ZooKeeper dynamic
 port `36761`. Tailnet reachability was limited to `22`, `1974` and `8888`.
-These are measured probe results at the time of the drill.
+A final scan after the update also covered every observed listener: `1973`,
+`1974`, `2181`, `8888`, `18317`, `18318`, `20000`, `20002` and `35515`, plus
+`22`, `20001` and `21000`. All were blocked over public IPv4 and IPv6; tailnet
+access remained limited to `22`, `1974` and `8888`. These are measured probe
+results at the time of the drills.
 
 ## Measured memory and bounded load
 
@@ -63,6 +67,33 @@ queued, completed all 60 successfully and drained both counts to zero. Across
 bridge cgroups 4,118,585,344 bytes. This was not a 60-call real-provider load.
 Measurements describe this host and workload; sampled peaks are not a universal
 minimum-memory guarantee.
+
+
+## Same-artifact module replacement
+
+The exact deployed JAR above was resubmitted through `admin.sh ... deploy update`.
+The module transitioned from instance `3a5c09e2-425d-ddf8-704f-5280cfe2460d` to
+`bea722c2-d859-9f19-5cd9-e84b8e87c146` in 314 seconds. Across 313 memory samples,
+minimum host available memory was 1,947,910,144 bytes (1.81 GiB), and maximum
+summed bridge cgroups were 5,579,550,720 bytes (5.20 GiB). At most two workers
+ran simultaneously; the old worker retired. The final module state was running
+and the metrics endpoint returned HTTP 200. Live lock inode `2098247` and
+preserved old lock inode `526255` were unchanged.
+
+
+The post-update cold probe passed: saved text, chunks and usage `307/5/312`
+matched exactly, replay dispatched zero times, and a new real-provider stream
+dispatched once with usage `307/5/312`. An explicit readiness refresh afterward
+reported available/configured/verified all true, reason `ok`. Both UIs and the
+metrics target check passed; all six bridge units, including the firewall, were
+active. The exact JAR hash was unchanged. An earlier refresh immediately after
+proxy failure had reported the model not visible before registry loading;
+readiness was verified again after stable startup.
+
+The existing 8 GiB host passed these bounded normal-load and update memory
+checks. These sampled measurements do not establish safety for arbitrary
+workloads or a smaller host. Replacing an instance with the identical artifact
+does not test cross-build/runtime upgrade or rollback compatibility.
 
 ## Encrypted backup and working isolated restore
 
